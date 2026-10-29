@@ -1,0 +1,28 @@
+[project]
+name = "gg-ingestion"
+version = "0.1.0"
+description = "Document registry, parser router, chunkers, extractors, pipeline tasks"
+license = "Apache-2.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "gg-common",
+    "saq[postgres]>=0.26",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "pypdf>=5.1",
+    "qdrant-client>=1.12",
+    "neo4j>=5.26",
+]
+
+[project.scripts]
+gg-ingest = "gg_ingestion.cli:main"
+
+[tool.uv.sources]
+gg-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gg_ingestion"]

@@ -1,0 +1,27 @@
+[project]
+name = "gg-synthdata"
+version = "0.1.0"
+description = "Synthetic Class 3 device QMS corpus generator and golden QA sets"
+license = "Apache-2.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "gg-common",
+    "openpyxl>=3.1",
+    "python-docx>=1.1",
+    "reportlab>=4.2",
+    "pillow>=11.0",
+    "pypdf>=5.0",
+]
+
+[project.scripts]
+synthdata = "gg_synthdata.cli:main"
+
+[tool.uv.sources]
+gg-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gg_synthdata"]

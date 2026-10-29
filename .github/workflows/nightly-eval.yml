@@ -1,0 +1,52 @@
+name: nightly-eval
+
+# Full eval battery over the complete golden QA set: retrieval, end-to-end
+# answers, routing, and noise sensitivity, with gates. History persists
+# between runs via the actions cache (freshest restore-key wins) and every
+# run uploads the trend dashboard as an artifact.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  battery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.13"
+      - run: uv sync --locked
+      - run: >-
+          docker compose -f infra/compose/docker-compose.yml --profile ci
+          up -d --wait postgres qdrant seaweedfs neo4j
+      - run: uv run alembic -c infra/migrations/alembic.ini upgrade head
+      - run: uv run synthdata generate --out .nightly-corpus --seed 42
+      - run: uv run gg-ingest run --corpus .nightly-corpus/corpus
+      - run: uv run gg-ingest graph-migrate
+      - run: uv run gg-ingest derive
+      - name: Restore eval history
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: eval-trends
+          key: gg-eval-history-${{ github.run_id }}
+          restore-keys: gg-eval-history-
+      - name: Run eval battery
+        # Score the corpus generated and ingested in this run, not the gitignored
+        # data/synthetic tree (absent on a fresh runner).
+        run: >-
+          uv run gg-eval battery --qa .nightly-corpus/qa/golden_qa.json
+          --out eval-trends/report.json
+          --history eval-trends/history.jsonl
+          --dashboard eval-trends/dashboard.html
+      - name: Upload trend dashboard
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: eval-trends
+          path: eval-trends/
+          if-no-files-found: error
+      - if: always()
+        run: docker compose -f infra/compose/docker-compose.yml --profile ci down -v

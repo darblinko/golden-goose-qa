@@ -1,0 +1,5 @@
+# Local development defaults. Each value is a fixed placeholder used only by the
+# docker compose stack on 127.0.0.1; production settings reject them (see settings.py).
+secret-assignment packages/common/src/gg_common/settings.py local development database passwords, rejected outside local and ci environments
+secret-assignment infra/compose/seaweedfs-s3.json local SeaweedFS S3 credentials for the docker compose stack
+secret-assignment packages/retrieval/tests/test_internal_api.py fake bearer token used by the connector unit tests

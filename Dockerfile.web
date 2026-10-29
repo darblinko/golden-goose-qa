@@ -1,0 +1,26 @@
+# Next.js standalone build for the web UI. NEXT_PUBLIC_API_URL is baked into
+# the client bundle at build time; the default targets the api service as
+# exposed on the developer's localhost.
+
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY apps/web/package.json apps/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+FROM node:22-alpine AS builder
+WORKDIR /app
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL NEXT_TELEMETRY_DISABLED=1
+COPY --from=deps /app/node_modules ./node_modules
+COPY apps/web .
+RUN npm run build
+
+FROM node:22-alpine AS runtime
+RUN addgroup -S gg && adduser -S gg -G gg
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
+COPY --from=builder --chown=gg:gg /app/.next/standalone ./
+COPY --from=builder --chown=gg:gg /app/.next/static ./.next/static
+USER gg
+EXPOSE 3000
+CMD ["node", "server.js"]

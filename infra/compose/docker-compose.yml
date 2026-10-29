@@ -1,0 +1,167 @@
+# Golden Goose local fleet. Profiles:
+#   core — datastores for local development
+#   ci   — same datastores, used by integration tests
+#   app  — api container (worker joins in Phase 2)
+#   obs  — Arize Phoenix tracing
+# All images are pinned; memory limits follow docs/architecture/system-architecture.md.
+name: goldengoose
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18-trixie
+    profiles: [core, ci]
+    environment:
+      POSTGRES_USER: ${GG_PG_ADMIN_USER:-gg_admin}
+      POSTGRES_PASSWORD: ${GG_PG_ADMIN_PASSWORD:-gg_admin_dev_password}
+      POSTGRES_DB: ${GG_PG_DATABASE:-goldengoose}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.3
+    profiles: [core, ci]
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 1536m
+
+  neo4j:
+    image: neo4j:5.26.12-community
+    profiles: [core, ci]
+    environment:
+      NEO4J_AUTH: neo4j/${GG_NEO4J_PASSWORD:-gg_neo4j_dev_password}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 768m
+      NEO4J_server_memory_pagecache_size: 512m
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.39
+    profiles: [core, ci]
+    command: >
+      server -dir=/data -ip=seaweedfs
+      -master.volumeSizeLimitMB=512 -volume.max=16
+      -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - seaweed_data:/data
+      - ./seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      # master binds to -ip=seaweedfs, so localhost is not listening
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://seaweedfs:9333/cluster/status || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    profiles: [app]
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      GG_PG_HOST: postgres
+      GG_QDRANT_URL: http://qdrant:6333
+      GG_NEO4J_URI: bolt://neo4j:7687
+      GG_S3_ENDPOINT_URL: http://seaweedfs:8333
+      GG_TRACING_ENABLED: ${GG_TRACING_ENABLED:-false}
+      GG_TRACING_ENDPOINT: http://phoenix:6006/v1/traces
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+
+  web:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.web
+    profiles: [app]
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  phoenix:
+    image: arizephoenix/phoenix:version-19.0.0
+    profiles: [obs]
+    ports:
+      - "127.0.0.1:6006:6006"
+      - "127.0.0.1:4317:4317"
+    volumes:
+      - phoenix_data:/mnt/data
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+
+volumes:
+  pg_data:
+  qdrant_data:
+  neo4j_data:
+  seaweed_data:
+  phoenix_data:

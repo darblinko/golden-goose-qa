@@ -1,0 +1,65 @@
+[project]
+name = "golden-goose"
+version = "0.1.0"
+description = "Agentic retrieval platform for medical device regulatory audit support"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Mitchell Foutz" }]
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "gg-common",
+    "gg-ingestion",
+    "gg-retrieval",
+    "gg-agents",
+    "gg-synthdata",
+    "gg-evals",
+    "goldengoose-api",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.14",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "types-pyyaml>=6.0",
+]
+
+[tool.uv.workspace]
+members = ["apps/api", "packages/*"]
+
+[tool.uv.sources]
+gg-common = { workspace = true }
+gg-ingestion = { workspace = true }
+gg-retrieval = { workspace = true }
+gg-agents = { workspace = true }
+gg-synthdata = { workspace = true }
+gg-evals = { workspace = true }
+goldengoose-api = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = false
+check_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "packages", "apps"]
+markers = [
+    "integration: requires docker compose services (postgres, qdrant, neo4j, seaweedfs)",
+    "external: requires real provider API keys",
+]
+addopts = "-m 'not integration and not external'"
