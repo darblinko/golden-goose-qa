@@ -1,87 +1,206 @@
 # Golden Goose
 
-Agentic retrieval chat platform for live regulatory audit support at a Class 3 medical device
-company. LangGraph agent over hybrid RAG (Qdrant dense+sparse), a schema-first knowledge graph
-(Neo4j), a structured warehouse (Postgres), and external regulatory tools (openFDA, eCFR,
-ClinicalTrials.gov, PubMed, web search).
+Agentic question answering over a medical device quality management system, built for regulatory
+audit support: a LangGraph agent over hybrid retrieval (Qdrant), a knowledge graph (Neo4j) and a
+record warehouse (Postgres), with every answer cited to document ID, revision and page.
 
-Read-only over quality records. Every answer cites doc ID, revision, and page. Every turn is
-written to an append-only, hash-chained audit log.
+## What it does
 
-## Documentation
+- Answers questions about controlled documents, quality records and design controls, with
+  document ID, revision and page citations in each answer
+  ([`docs/validation/intended-use.md`](docs/validation/intended-use.md)).
+- Routes count questions to the Postgres register warehouse and trace questions to fixed Neo4j
+  traversals. Rate comparison questions get a warehouse count and an external count, reported
+  separately because no shared denominator is available
+  ([`packages/agents/src/gg_agents/graph.py`](packages/agents/src/gg_agents/graph.py),
+  `compare` in [`nodes.py`](packages/agents/src/gg_agents/nodes.py)).
+- Queries external regulatory sources: openFDA, eCFR, ClinicalTrials.gov, PubMed and web search
+  ([`packages/retrieval/src/gg_retrieval/tools/external/`](packages/retrieval/src/gg_retrieval/tools/external/)).
+- Writes every chat turn to an append-only, hash-chained audit log
+  ([ADR 0010](docs/adr/0010-append-only-audit-log.md)).
+- Generates its own test corpus: a synthetic QMS for the fictional Halvern Medical infusion pump
+  family, with a golden question set and seeded defects
+  ([`packages/synthdata/`](packages/synthdata/)).
+- Runs a gated eval battery covering retrieval recall, answer grounding, citation precision and
+  recall, sentence support, routing accuracy and reranker noise. CI runs it on the 30-question
+  smoke set for each push and pull request, and a nightly workflow runs the full golden set
+  ([`.github/workflows/`](.github/workflows/), [ADR 0019](docs/adr/0019-eval-battery-lexical-gates.md)).
 
-- `docs/architecture/system-architecture.md` — master architecture
-- `docs/planning/implementation-plan.md` — phased plan with acceptance criteria
-- `docs/research/` — research reports 01-03 underpinning the design
-- `docs/adr/` — architecture decision records
-- `docs/validation/` — intended use statement and requirements traceability
-- `docs/runbooks/` — operator runbook, backup and restore, cloud deployment
+## How it works
 
-## Quick start
+Ingestion registers each file in a Postgres registry, parses it, chunks it, and indexes dense
+and BM25 sparse vectors in one Qdrant collection. Stage outputs are stored in SeaweedFS keyed by
+content hash ([`pipeline.py`](packages/ingestion/src/gg_ingestion/pipeline.py)). A separate
+`derive` step reads the parsed artifacts of the latest indexed version of each document and
+rebuilds the Neo4j graph and the Postgres registers on every run
+([ADR 0014](docs/adr/0014-graph-and-registers-as-rebuildable-projections.md)).
 
-Requirements: Docker, uv (>=0.8), Node 20+.
+```mermaid
+flowchart LR
+  files["Corpus files<br/>docx, pdf, xlsx, xml"] --> register["Register<br/>Postgres registry"]
+  register --> parse["Parse<br/>OCR for scanned pages"]
+  parse --> chunk["Chunk"] --> embed["Dense embeddings<br/>and BM25 sparse vectors"]
+  embed --> qdrant[("Qdrant")]
+  parse --> artifacts[("Stage artifacts<br/>parse, chunks, metrics<br/>SeaweedFS")]
+  chunk --> artifacts
+  register --> derive["gg-ingest derive"]
+  artifacts --> derive
+  derive --> neo4j[("Neo4j graph")]
+  derive --> registers[("Postgres registers")]
+```
+
+At question time a deterministic regex router runs first and the LLM router handles the rest
+([ADR 0016](docs/adr/0016-deterministic-tool-routing.md)). Document questions go through hybrid
+search with reciprocal rank fusion and a reranker, a sufficiency grade, up to 2 query rewrites,
+generation, and a citation verifier that allows one regeneration before it withholds the answer
+([`packages/agents/src/gg_agents/state.py`](packages/agents/src/gg_agents/state.py),
+[`nodes.py`](packages/agents/src/gg_agents/nodes.py)). If the rewrites are exhausted and some
+evidence was retrieved, generation runs and the verifier decides. Tool nodes hand their result to
+generation, and end the turn on a tool failure or when the question names an entity that is not
+in the corpus. The compare node also ends the turn when no shared denominator exists, which is
+the case for every comparison at present.
+
+```mermaid
+flowchart TD
+  q([Question]) --> route
+  route -->|document| retrieve
+  route -->|external| external --> retrieve
+  route -->|aggregate| warehouse
+  route -->|compare| compare
+  route -->|trace| graph_walk
+  route -->|out of scope| out_of_scope --> done([End])
+  retrieve --> grade
+  grade -->|sufficient, or rewrites exhausted with evidence| generate
+  grade -->|insufficient, fewer than 2 rewrites| rewrite --> retrieve
+  grade -->|rewrites exhausted, nothing retrieved| no_evidence --> done
+  warehouse -->|result| generate
+  compare -->|result| generate
+  graph_walk -->|result| generate
+  warehouse -->|failure or unknown entity| done
+  compare -->|no shared denominator| done
+  graph_walk -->|failure or unknown entity| done
+  generate --> verify
+  verify -->|verified, or withheld after the retry| done
+  verify -->|first failure| generate
+```
+
+## Results
+
+Evaluation results depend on the synthetic example Action Priority table and on the provider
+configuration (deterministic fakes when no API keys are set). This repository does not publish
+figures. Run the commands in the Quickstart (`synthdata generate`, `gg-ingest run`,
+`gg-ingest derive`, `gg-eval battery`) to produce them for your own environment.
+
+## Quickstart
+
+Requirements: Docker with Compose, [uv](https://docs.astral.sh/uv/) (it installs the required
+Python 3.13), and Node 22 for the web UI, the version CI and `Dockerfile.web` use. No API keys
+are needed; without them every provider is a deterministic fake.
 
 ```bash
-cp .env.example .env          # provider API keys; without them deterministic fakes are used
-uv sync
-docker compose -f infra/compose/docker-compose.yml --profile core up -d
+git clone https://github.com/darblinko/golden-goose
+cd golden-goose
+uv sync --locked
+uv run pytest                       # unit tests, no services needed
+```
+
+Start the stores, build the corpus and run the battery:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml --profile core up -d --wait
 uv run alembic -c infra/migrations/alembic.ini upgrade head
-uv run pytest
-```
-
-Generate the synthetic QMS corpus, ingest it, and check the retrieval gate:
-
-```bash
-uv run synthdata generate --out /tmp/gg-corpus
+uv run synthdata generate --out /tmp/gg-corpus --seed 42
 uv run gg-ingest run --corpus /tmp/gg-corpus/corpus
-uv run gg-ingest graph-migrate    # Neo4j schema constraints
-uv run gg-ingest derive           # knowledge graph + register warehouse from parsed artifacts
-uv run gg-eval retrieval --qa /tmp/gg-corpus/qa/golden_qa.json --smoke   # recall@10 gate 0.8
+uv run gg-ingest graph-migrate
+uv run gg-ingest derive
+uv run gg-eval battery --qa /tmp/gg-corpus/qa/golden_qa.json --out /tmp/gg-battery.json
 ```
 
-Operations and quality gates:
-
-```bash
-uv run gg-eval battery --qa /tmp/gg-corpus/qa/golden_qa.json   # gated eval battery
-uv run gg-backup create --dest backups                         # backup authoritative stores
-uv run python scripts/load_sanity.py                           # concurrent chat + derive load check
-uv run python scripts/license_audit.py                         # dependency license policy
-```
-
-The battery gates retrieval recall, grounded answer rate, sentence support,
-deterministic routing accuracy, and reranker noise robustness (ADR 0019); a
-nightly workflow reruns it from a fresh corpus and renders a trend dashboard.
-See `docs/runbooks/operator-runbook.md` for the full operating procedures.
+The stores bind 127.0.0.1 ports 5432 (Postgres), 6333 and 6334 (Qdrant), 7474 and 7687 (Neo4j)
+and 8333 (SeaweedFS). If one is taken, remap it in a compose override file and point the tools at
+it with `GG_PG_PORT`, `GG_QDRANT_URL`, `GG_NEO4J_URI` and `GG_S3_ENDPOINT_URL`. Provider keys and other settings are listed in
+[`.env.example`](.env.example); copy it to `.env` to use them.
 
 Run the API and the web UI:
 
 ```bash
 uv run uvicorn goldengoose_api.main:app --port 8000
-cd apps/web && npm install && npm run dev     # http://localhost:3000
+cd apps/web && npm ci && npm run dev          # http://localhost:3000
 ```
 
-Sign in with any email (dev tokens are minted locally in `local`/`ci`
-environments only), start a thread, and ask e.g. "What does the CAPA
-procedure require before a CAPA can be closed?" — the answer streams with
-agent steps, citations open in the side panel, and the turn lands in the
-hash-chained audit log.
+In the `local` and `ci` environments the API mints development tokens for any valid email. In
+the `dev` and `prod` environments the settings refuse to load while any of the five shipped
+development secrets is still set (`_reject_dev_secrets_in_deployed_envs` in
+`packages/common/src/gg_common/settings.py`).
+Operating procedures, backup and restore are in [`docs/runbooks/`](docs/runbooks/).
 
-Count and trace questions ("How many complaints were received in 2024?",
-"Which verification reports cover REQ-001?") route deterministically to the
-register warehouse and the knowledge graph, so they answer with exact
-numbers and walked edges even when no provider keys are configured.
-
-## Layout
+## Project layout
 
 ```
-apps/api          FastAPI + LangGraph service (uvicorn / saq worker entrypoints)
-apps/web          Next.js frontend
-packages/common   settings, models, provider adapters, object store, telemetry
-packages/ingestion  registry, parser router, chunkers, extractors, pipeline tasks
-packages/retrieval  hybrid search, fusion, rerank, graph traversal, SQL tools
-packages/agents   LangGraph graphs, nodes, prompts, tool registry
-packages/synthdata  synthetic QMS corpus generator + golden QA sets
-infra/compose     docker compose (profiles: core, obs, ci)
-infra/migrations  Alembic (Postgres) + versioned Cypher (Neo4j)
-infra/terraform   AWS / Azure skeletons
+apps/api            FastAPI service and LangGraph agent entrypoints
+apps/web            Next.js chat UI with citation side panel
+packages/common     settings, provider adapters and fakes, ACL, audit log, object store
+packages/ingestion  registry, parsers, chunking, indexing, graph and register derivation
+packages/retrieval  hybrid search, rerank, graph traversals, guarded SQL, external tools
+packages/agents     LangGraph graph, nodes, prompts, deterministic router
+packages/synthdata  synthetic QMS corpus generator and golden question sets
+packages/evals      retrieval, answer, routing and noise evals; the gated battery
+infra/compose       docker compose profiles: core, ci, obs, app
+infra/migrations    Alembic (Postgres) and versioned Cypher (Neo4j)
+infra/terraform     AWS and Azure skeletons; nothing is deployed (ADR 0020)
+scripts             license audit, load check, AWS teardown
+tests               cross-package unit and integration tests
+docs                architecture, ADRs, plan, research, validation, runbooks, results
 ```
+
+## Design decisions and limitations
+
+Decisions, each recorded as an ADR in [`docs/adr/`](docs/adr/):
+
+- Deterministic regex routing before the LLM router, so count and trace questions route the same
+  way with or without keys ([ADR 0016](docs/adr/0016-deterministic-tool-routing.md)).
+- BM25 sparse vectors instead of a learned sparse model such as SPLADE: term weights are
+  computed at chunk time and Qdrant applies IDF over the live collection
+  ([ADR 0012](docs/adr/0012-local-bm25-sparse-vectors.md)).
+- Graph and registers are rebuildable projections of the parsed artifacts
+  ([ADR 0014](docs/adr/0014-graph-and-registers-as-rebuildable-projections.md)).
+- Lexical gates instead of an LLM judge, so the battery is deterministic and free to run nightly
+  ([ADR 0019](docs/adr/0019-eval-battery-lexical-gates.md)).
+- Hosted providers with deterministic fakes behind the same interfaces
+  ([ADR 0009](docs/adr/0009-hosted-providers-and-fakes.md)).
+
+Limitations:
+
+- Read-only decision support. It is not a 21 CFR Part 11 electronic signature system and does not
+  replace review of the controlled source ([`docs/validation/intended-use.md`](docs/validation/intended-use.md)).
+- All results above use fakes. With fakes the regex layer is the only router, the generator is
+  extractive, and the verifier does not judge entailment. The battery here measures retrieval,
+  routing and the citation path. LLM answer quality is not measured.
+- Sentence support is lexical token coverage with a 0.5 gate. It measures surface overlap with
+  the evidence and does not test semantic entailment
+  ([ADR 0019](docs/adr/0019-eval-battery-lexical-gates.md)). A strict xfail test documents that
+  it cannot detect an actor swap (`test_actor_swap_is_detected` in
+  `packages/evals/tests/test_entailment.py`).
+- The graph has 7 node labels and graph questions run through fixed parameterized traversals;
+  there is no Text2Cypher ([`docs/validation/known-limitations.md`](docs/validation/known-limitations.md)).
+  Person nodes are keyed by name (`NODE_KEY_PROPERTY` in
+  `packages/ingestion/src/gg_ingestion/extract/model.py`).
+- Keyless embeddings are SHA-256 pseudo-vectors, so dense retrieval under fakes carries no
+  semantics and recall comes from the BM25 branch and the reranker stand-in
+  (`packages/common/src/gg_common/providers/fakes.py`).
+- The corpus is synthetic and generated by this repository. Results on it do not transfer to a
+  real QMS without a new golden set.
+- Rate limiting is in process and single instance; authentication is bearer JWT without OIDC
+  federation ([`docs/validation/known-limitations.md`](docs/validation/known-limitations.md)).
+
+## Documentation
+
+- [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md): architecture
+- [`docs/planning/implementation-plan.md`](docs/planning/implementation-plan.md): phased plan with acceptance criteria
+- [`docs/research/`](docs/research/): QMS document taxonomy, hybrid RAG survey, stack evaluation
+- [`docs/validation/`](docs/validation/): intended use, requirements traceability, known limitations
+- [`docs/runbooks/`](docs/runbooks/): operator runbook, backup and restore, cloud deployment
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
