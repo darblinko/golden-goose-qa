@@ -26,7 +26,7 @@ class CoverageInvariants:
     pinned_fingerprint: str | None = None  # when set, QA structure must match exactly
 
 
-# The full golden set (currently 215 items across 12 patterns, 9 aggregate
+# The full golden set (currently 216 items across 12 patterns, 9 aggregate
 # skips). Floors sit comfortably below current coverage so an ordinary edit
 # passes, but a materially shrunk or lopsided set fails.
 FULL_INVARIANTS = CoverageInvariants(
@@ -37,7 +37,7 @@ FULL_INVARIANTS = CoverageInvariants(
     min_noise_tested=150,
 )
 
-# The smoke subset (currently ~34 items after every pattern is represented).
+# The smoke subset (currently 30 items after every pattern is represented).
 SMOKE_INVARIANTS = CoverageInvariants(
     min_items=30,
     min_scored=24,
