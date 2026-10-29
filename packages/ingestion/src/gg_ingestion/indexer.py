@@ -230,11 +230,11 @@ async def index_chunks(
     # never missing.
     #
     # The delete stays scoped to this exact version: every other version of the
-    # document — including a different version that happens to share this revision
-    # label — must survive so as-of queries can still reach it. Deleting by
-    # doc_key+revision would erase a sibling version's historical vectors when
-    # content is corrected under an unchanged revision; the immutable version_id
-    # is the only safe retirement key.
+    # document must survive so as-of queries can still reach it. The pipeline
+    # refuses a new version that reuses another version's revision label before
+    # indexing (registry.assert_unique_revision), but versions with no revision
+    # label may coexist, so doc_key+revision does not identify one version; the
+    # immutable version_id is the retirement key.
     written = 0
     for batch in _batches(children, batch_size):
         with cost_stage("ingest.embed"):
