@@ -9,7 +9,7 @@ was fragile in this workspace. The metrics we gate on are small, well-known
 formulas over lists of ids — not worth a JIT compiler dependency.
 
 ## Decision
-`gg_evals.metrics` implements recall@k, MRR, and nDCG@k directly (~60 lines),
+`gg_evals.metrics` implements recall@k, MRR, and nDCG@k directly (49 lines),
 with unit tests asserting known-answer values, including the tie and
 missing-id edge cases. The eval harness and CI smoke gate consume these.
 
