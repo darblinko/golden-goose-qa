@@ -11,6 +11,7 @@ import asyncio
 import json
 import time
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
@@ -135,7 +136,11 @@ class HttpxFetcher(Fetcher):
 class CachingFetcher(Fetcher):
     """TTL cache + per-host minimum request interval around another fetcher.
 
-    Clock and sleep are injectable so tests can drive time deterministically.
+    The cache is bounded by entry count and by the serialized size of the
+    cached bodies. Each insert drops expired entries, then evicts the least
+    recently used until both limits hold; a body larger than the byte limit is
+    not cached. Clock and sleep are injectable so tests can drive time
+    deterministically.
     """
 
     def __init__(
@@ -146,13 +151,19 @@ class CachingFetcher(Fetcher):
         min_interval_seconds: float = 0.25,
         time_fn: Callable[[], float] = time.monotonic,
         sleep_fn: Callable[[float], Awaitable[None]] | None = None,
+        max_entries: int = 512,
+        max_bytes: int = 16 * 1024 * 1024,
     ) -> None:
         self._inner = inner
         self._ttl = ttl_seconds
         self._min_interval = min_interval_seconds
         self._time = time_fn
         self._sleep = sleep_fn or asyncio.sleep
-        self._cache: dict[str, tuple[float, Any]] = {}
+        self._max_entries = max_entries
+        self._max_bytes = max_bytes
+        # key -> (expires_at, payload, size in bytes), least recently used first
+        self._cache: OrderedDict[str, tuple[float, Any, int]] = OrderedDict()
+        self._cache_bytes = 0
         self._last_request_by_host: dict[str, float] = {}
         self._host_locks: dict[str, asyncio.Lock] = {}
 
@@ -175,21 +186,56 @@ class CachingFetcher(Fetcher):
         self, method: str, url: str, body: dict[str, Any], call: Callable[[], Awaitable[Any]]
     ) -> Any:
         key = f"{method}\x1e{url}\x1e{json.dumps(body, sort_keys=True, default=str)}"
-        hit = self._cache.get(key)
-        if hit is not None and hit[0] > self._time():
-            return hit[1]
+        hit = self._lookup(key)
+        if hit is not None:
+            return hit
         # Serialize dispatch to a host so the throttle interval is honored across
         # concurrent calls (an uncoordinated read of the last-request time would
         # let a burst fire together and exceed the provider's rate); different
         # hosts still proceed in parallel.
         async with self._lock_for(urlsplit(url).netloc):
-            hit = self._cache.get(key)
-            if hit is not None and hit[0] > self._time():
-                return hit[1]  # populated by a concurrent request while we waited
+            hit = self._lookup(key)
+            if hit is not None:
+                return hit  # populated by a concurrent request while we waited
             await self._throttle(urlsplit(url).netloc)
             payload = await call()
-            self._cache[key] = (self._time() + self._ttl, payload)
+            self._store(key, payload)
             return payload
+
+    @property
+    def cache_size(self) -> tuple[int, int]:
+        """(entries, bytes) currently held."""
+        return len(self._cache), self._cache_bytes
+
+    def _lookup(self, key: str) -> Any | None:
+        hit = self._cache.get(key)
+        if hit is None:
+            return None
+        if hit[0] <= self._time():
+            self._drop(key)
+            return None
+        self._cache.move_to_end(key)
+        return hit[1]
+
+    def _store(self, key: str, payload: Any) -> None:
+        if key in self._cache:
+            self._drop(key)
+        size = len(json.dumps(payload, default=str))
+        now = self._time()
+        for stale in [k for k, (expires, _, _) in self._cache.items() if expires <= now]:
+            self._drop(stale)
+        if size > self._max_bytes or self._max_entries < 1:
+            return
+        while self._cache and (
+            len(self._cache) >= self._max_entries or self._cache_bytes + size > self._max_bytes
+        ):
+            self._drop(next(iter(self._cache)))
+        self._cache[key] = (now + self._ttl, payload, size)
+        self._cache_bytes += size
+
+    def _drop(self, key: str) -> None:
+        _, _, size = self._cache.pop(key)
+        self._cache_bytes -= size
 
     async def _throttle(self, host: str) -> None:
         last = self._last_request_by_host.get(host)

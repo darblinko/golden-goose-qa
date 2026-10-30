@@ -61,6 +61,46 @@ class TestCachingFetcher:
         await fetcher.get_json("https://api.test/x", {"q": "a"})
         assert len(inner.requests) == 2
 
+    async def test_expired_entries_are_evicted_not_kept(self):
+        inner = FakeFetcher((("api.test", {"value": 1}),))
+        clock = _Clock()
+        fetcher = CachingFetcher(
+            inner, ttl_seconds=10.0, min_interval_seconds=0.0, time_fn=clock.time
+        )
+        for i in range(5):
+            await fetcher.get_json("https://api.test/x", {"q": str(i)})
+        clock.now = 11.0
+        await fetcher.get_json("https://api.test/x", {"q": "fresh"})
+        assert fetcher.cache_size == (1, len('{"value": 1}'))
+
+    async def test_entry_limit_evicts_least_recently_used(self):
+        inner = FakeFetcher((("api.test", {"value": 1}),))
+        fetcher = CachingFetcher(
+            inner, min_interval_seconds=0.0, time_fn=_Clock().time, max_entries=2
+        )
+        await fetcher.get_json("https://api.test/x", {"q": "a"})
+        await fetcher.get_json("https://api.test/x", {"q": "b"})
+        await fetcher.get_json("https://api.test/x", {"q": "a"})  # a is now most recent
+        await fetcher.get_json("https://api.test/x", {"q": "c"})  # evicts b
+        assert fetcher.cache_size[0] == 2
+        await fetcher.get_json("https://api.test/x", {"q": "a"})
+        assert len(inner.requests) == 3
+        await fetcher.get_json("https://api.test/x", {"q": "b"})
+        assert len(inner.requests) == 4
+
+    async def test_byte_limit_bounds_the_cache_and_skips_oversized_bodies(self):
+        inner = FakeFetcher((("api.test/big", {"v": "x" * 100}), ("api.test", {"v": 1})))
+        fetcher = CachingFetcher(
+            inner, min_interval_seconds=0.0, time_fn=_Clock().time, max_bytes=50
+        )
+        await fetcher.get_json("https://api.test/big", {})
+        assert fetcher.cache_size == (0, 0)
+        for i in range(10):
+            await fetcher.get_json("https://api.test/x", {"q": str(i)})
+        entries, size = fetcher.cache_size
+        assert size <= 50
+        assert entries == 50 // len('{"v": 1}')
+
     async def test_distinct_params_are_distinct_cache_entries(self):
         inner = FakeFetcher((("api.test", {"value": 1}),))
         fetcher = CachingFetcher(inner, min_interval_seconds=0.0, time_fn=_Clock().time)
