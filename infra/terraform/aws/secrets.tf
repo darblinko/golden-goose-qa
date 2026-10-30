@@ -8,12 +8,13 @@ locals {
     neo4j-password  = var.neo4j_password
     anthropic-key   = var.anthropic_api_key
     voyage-key      = var.voyage_api_key
+    google-key      = var.google_api_key
   }
 }
 
 resource "aws_ssm_parameter" "secret" {
   # Static key set: for_each cannot range over the sensitive map itself.
-  for_each = toset(["db-app-password", "jwt-secret", "neo4j-password", "anthropic-key", "voyage-key"])
+  for_each = toset(["db-app-password", "jwt-secret", "neo4j-password", "anthropic-key", "voyage-key", "google-key"])
 
   name  = "/${local.name}/${each.key}"
   type  = "SecureString"

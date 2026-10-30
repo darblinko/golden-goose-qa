@@ -43,6 +43,7 @@ locals {
       { name = "GG_NEO4J_PASSWORD", valueFrom = aws_ssm_parameter.secret["neo4j-password"].arn },
       { name = "GG_ANTHROPIC_API_KEY", valueFrom = aws_ssm_parameter.secret["anthropic-key"].arn },
       { name = "GG_VOYAGE_API_KEY", valueFrom = aws_ssm_parameter.secret["voyage-key"].arn },
+      { name = "GG_GOOGLE_API_KEY", valueFrom = aws_ssm_parameter.secret["google-key"].arn },
     ],
     # Injected only when a Qdrant API key was supplied (see secrets.tf).
     [for p in aws_ssm_parameter.qdrant_api_key : { name = "GG_QDRANT_API_KEY", valueFrom = p.arn }],

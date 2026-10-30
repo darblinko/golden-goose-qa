@@ -133,9 +133,10 @@ cd apps/web && npm ci && npm run dev          # http://localhost:3000
 ```
 
 In the `local` and `ci` environments the API mints development tokens for any valid email. In
-the `dev` and `prod` environments the settings refuse to load while any of the five shipped
-development secrets is still set (`_reject_dev_secrets_in_deployed_envs` in
-`packages/common/src/gg_common/settings.py`).
+the `dev` and `prod` environments the settings refuse to load while any of the four shipped
+runtime development secrets is still set (`_reject_dev_secrets_in_deployed_envs` in
+`packages/common/src/gg_common/settings.py`), and migrations refuse the shipped development
+admin password (`require_admin_credentials`).
 Operating procedures, backup and restore are in [`docs/runbooks/`](docs/runbooks/).
 
 ### FMEA Action Priority table

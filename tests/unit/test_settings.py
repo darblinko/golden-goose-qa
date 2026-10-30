@@ -6,6 +6,7 @@ from gg_common.settings import (
     PostgresSettings,
     ProviderSettings,
     effective_settings_summary,
+    require_admin_credentials,
 )
 
 
@@ -86,3 +87,33 @@ def test_local_keeps_dev_secret_defaults(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     settings = AppSettings(environment="local")
     assert settings.auth_jwt_secret.get_secret_value() == "dev_only_jwt_secret_change_me_0123456789"
+
+
+def test_prod_app_process_needs_no_admin_password(monkeypatch, tmp_path):
+    # The api and worker never connect as gg_admin, so Terraform passes them no
+    # admin credential; the runtime guard must not demand one.
+    monkeypatch.chdir(tmp_path)
+    for name in ("GG_AUTH_JWT_SECRET", "GG_PG_PASSWORD", "GG_NEO4J_PASSWORD", "GG_S3_SECRET_KEY"):
+        monkeypatch.setenv(name, f"real-{name.lower()}")
+    settings = AppSettings(environment="prod")
+    with pytest.raises(ValueError, match="GG_PG_ADMIN_PASSWORD"):
+        require_admin_credentials(settings)
+
+
+def test_admin_credentials_accepted_when_overridden(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "GG_AUTH_JWT_SECRET",
+        "GG_PG_PASSWORD",
+        "GG_PG_ADMIN_PASSWORD",
+        "GG_NEO4J_PASSWORD",
+        "GG_S3_SECRET_KEY",
+    ):
+        monkeypatch.setenv(name, f"real-{name.lower()}")
+    settings = AppSettings(environment="prod")
+    assert require_admin_credentials(settings).startswith("postgresql+psycopg://gg_admin:")
+
+
+def test_local_admin_credentials_keep_dev_default(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert require_admin_credentials(AppSettings(environment="local"))

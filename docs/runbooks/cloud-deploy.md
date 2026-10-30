@@ -47,8 +47,8 @@ terraform apply \
   -var qdrant_url=https://<cluster>.cloud.qdrant.io \
   -var neo4j_uri=neo4j+s://<id>.databases.neo4j.io
 # sensitive vars (db_admin_password, db_app_password, jwt_secret,
-# neo4j_password, anthropic_api_key, voyage_api_key, and qdrant_api_key when
-# using Qdrant Cloud) via TF_VAR_* env or a gitignored *.tfvars file — never on
+# neo4j_password, anthropic_api_key, voyage_api_key, google_api_key, and
+# qdrant_api_key when using Qdrant Cloud) via TF_VAR_* env or a gitignored *.tfvars file — never on
 # the command line in shared shells
 ```
 
@@ -67,6 +67,12 @@ containers.
 
 After apply, bootstrap the database once (any host that can reach RDS —
 tasks run in public subnets, so a one-off ECS task or a temporary bastion):
+
+The api and worker tasks receive no admin credential. Migrations are the only
+step that uses gg_admin; export `GG_PG_ADMIN_PASSWORD` (the db_admin_password
+value) in the shell that runs them. With `GG_ENVIRONMENT` set to dev or prod,
+the migration environment refuses to run on the shipped development admin
+password.
 
 ```bash
 # as gg_admin:
@@ -107,7 +113,9 @@ deleted.
 Stands up: resource group, PG Flexible Server (version 17), a storage account
 with the three containers, a Container Apps environment running api/worker/web,
 and an Entra ID app registration. Same variable surface and the same bootstrap
-and acceptance procedure as AWS.
+and acceptance procedure as AWS, plus `s3_gateway_endpoint_url`,
+`s3_gateway_access_key` and `s3_gateway_secret_key` for the S3 gateway described
+below.
 
 Postgres version deviates by cloud: AWS RDS pins engine major 18, Azure
 Flexible Server pins 17 (the newest major the two managed services each offer at

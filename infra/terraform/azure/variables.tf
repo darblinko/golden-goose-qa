@@ -71,3 +71,28 @@ variable "voyage_api_key" {
   sensitive = true
   default   = ""
 }
+
+variable "google_api_key" {
+  description = "Gemini key for OCR of scanned pages (GG_GOOGLE_API_KEY); required because GG_REQUIRE_REAL_PROVIDERS is true"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# Blob has no native S3 API (storage.tf). These point the S3ObjectStore at an
+# S3 gateway in front of Blob; left empty, document access fails at runtime.
+variable "s3_gateway_endpoint_url" {
+  type    = string
+  default = ""
+}
+
+variable "s3_gateway_access_key" {
+  type    = string
+  default = ""
+}
+
+variable "s3_gateway_secret_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}

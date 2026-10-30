@@ -3,7 +3,7 @@ audit table); the runtime gg_app role receives only the grants defined in the
 migrations themselves."""
 
 from alembic import context
-from gg_common.settings import get_settings
+from gg_common.settings import get_settings, require_admin_credentials
 from sqlalchemy import create_engine, pool
 
 config = context.config
@@ -11,7 +11,7 @@ target_metadata = None
 
 
 def _database_url() -> str:
-    return get_settings().postgres.admin_sqlalchemy_url
+    return require_admin_credentials(get_settings())
 
 
 def run_migrations_offline() -> None:

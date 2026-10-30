@@ -107,3 +107,10 @@ variable "voyage_api_key" {
   sensitive = true
   default   = ""
 }
+
+variable "google_api_key" {
+  description = "Gemini key for OCR of scanned pages (GG_GOOGLE_API_KEY); required because GG_REQUIRE_REAL_PROVIDERS is true"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

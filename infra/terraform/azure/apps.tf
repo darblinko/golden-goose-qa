@@ -19,6 +19,8 @@ locals {
     { name = "GG_QDRANT_URL", value = var.qdrant_url },
     { name = "GG_NEO4J_URI", value = var.neo4j_uri },
     { name = "GG_NEO4J_USER", value = var.neo4j_user },
+    { name = "GG_S3_ENDPOINT_URL", value = var.s3_gateway_endpoint_url },
+    { name = "GG_S3_ACCESS_KEY", value = var.s3_gateway_access_key },
     { name = "GG_S3_BUCKET_DOCUMENTS", value = "gg-documents" },
     { name = "GG_S3_BUCKET_ARTIFACTS", value = "gg-artifacts" },
     { name = "GG_REQUIRE_REAL_PROVIDERS", value = "true" },
@@ -30,6 +32,8 @@ locals {
     neo4j-password = var.neo4j_password
     anthropic-key  = var.anthropic_api_key
     voyage-key     = var.voyage_api_key
+    google-key     = var.google_api_key
+    s3-secret-key  = var.s3_gateway_secret_key
   }
 
   api_secret_env = [
@@ -38,6 +42,8 @@ locals {
     { name = "GG_NEO4J_PASSWORD", secret_name = "neo4j-password" },
     { name = "GG_ANTHROPIC_API_KEY", secret_name = "anthropic-key" },
     { name = "GG_VOYAGE_API_KEY", secret_name = "voyage-key" },
+    { name = "GG_GOOGLE_API_KEY", secret_name = "google-key" },
+    { name = "GG_S3_SECRET_KEY", secret_name = "s3-secret-key" },
   ]
 }
 

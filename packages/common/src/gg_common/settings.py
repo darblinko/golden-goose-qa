@@ -290,7 +290,9 @@ class AppSettings(BaseSettings):
         """Deployed environments must not run on the shipped dev secrets. Local
         and CI keep the defaults so tests and offline dev need no setup; dev and
         prod fail closed at construction if any secret still equals its baked-in
-        development literal."""
+        development literal. The admin password is checked where it is used
+        (require_admin_credentials), because the api and worker never connect
+        as gg_admin and are deployed without that credential."""
         if self.environment not in ("dev", "prod"):
             return self
         offenders = [
@@ -298,11 +300,6 @@ class AppSettings(BaseSettings):
             for name, secret, dev_default in (
                 ("auth_jwt_secret", self.auth_jwt_secret, _DEV_JWT_SECRET),
                 ("postgres.password", self.postgres.password, _DEV_PG_PASSWORD),
-                (
-                    "postgres.admin_password",
-                    self.postgres.admin_password,
-                    _DEV_PG_ADMIN_PASSWORD,
-                ),
                 ("neo4j.password", self.neo4j.password, _DEV_NEO4J_PASSWORD),
                 ("objectstore.secret_key", self.objectstore.secret_key, _DEV_S3_SECRET),
             )
@@ -315,6 +312,21 @@ class AppSettings(BaseSettings):
                 "GG_* environment variables to real secrets."
             )
         return self
+
+
+def require_admin_credentials(settings: AppSettings) -> str:
+    """The gg_admin SQLAlchemy URL for migrations and other admin tasks.
+
+    In dev and prod, refuses the shipped development admin password."""
+    if (
+        settings.environment in ("dev", "prod")
+        and settings.postgres.admin_password.get_secret_value() == _DEV_PG_ADMIN_PASSWORD
+    ):
+        raise ValueError(
+            f"environment={settings.environment!r} still uses the development admin "
+            "password. Set GG_PG_ADMIN_PASSWORD before running migrations."
+        )
+    return settings.postgres.admin_sqlalchemy_url
 
 
 @lru_cache(maxsize=1)
