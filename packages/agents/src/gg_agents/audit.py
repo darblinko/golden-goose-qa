@@ -1,7 +1,11 @@
 """Audit payload for a completed chat turn. Records what the architecture
-requires per response: model, prompt hash, retrieved chunk ids, route, and
-verification outcome. Written to audit.audit_log by the API layer."""
+requires per response: model, prompt hash, retrieved chunk ids, route,
+verification outcome, the answer text with its SHA-256 digest, the citations
+shown with it, and a digest of every evidence block the generator was given.
+Written to audit.audit_log by the API layer; the audit chain keeps the answer
+record after the thread and its messages are deleted."""
 
+import hashlib
 from typing import Any
 
 from gg_common.audit import AuditEvent
@@ -11,6 +15,36 @@ from gg_agents.state import AgentState
 
 TURN_ACTION = "chat.turn"
 TURN_FAILURE_ACTION = "chat.turn.failed"
+
+_CITATION_FIELDS = (
+    "marker",
+    "doc_key",
+    "doc_type",
+    "revision",
+    "version_id",
+    "section_path",
+    "page",
+    "provenance",
+    "source_doc_keys",
+)
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _evidence_record(parent: dict[str, Any]) -> dict[str, Any]:
+    """Identity and digest of one evidence block: for a tool result the
+    section_path is the executed query, for a document the section."""
+    return {
+        "parent_id": parent.get("parent_id"),
+        "doc_key": parent.get("doc_key"),
+        "doc_type": parent.get("doc_type"),
+        "version_id": parent.get("version_id"),
+        "section_path": parent.get("section_path"),
+        "provenance": parent.get("provenance", "internal"),
+        "text_sha256": _sha256(parent.get("text", "")),
+    }
 
 
 def build_turn_audit_event(
@@ -28,6 +62,15 @@ def build_turn_audit_event(
         "prompt_hash": state.get("prompt_hash", ""),
         "chunk_ids": [c["chunk_id"] for c in state.get("chunks", [])],
         "cited": [c["citation"] for c in state.get("citations", [])],
+        "citations": [
+            {field: c.get(field) for field in _CITATION_FIELDS} for c in state.get("citations", [])
+        ],
+        "evidence": [
+            _evidence_record(p)
+            for p in [*state.get("parents", []), *state.get("external_parents", [])]
+        ],
+        "answer": state.get("answer", ""),
+        "answer_sha256": _sha256(state.get("answer", "")),
         "verdict": state.get("verdict", ""),
         "verifier_error": state.get("verifier_error"),
         "external_error": state.get("external_error"),

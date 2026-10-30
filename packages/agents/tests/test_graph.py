@@ -2,6 +2,7 @@
 bounded rewrites, citation-gated generation, verifier retry/downgrade, and the
 extractive fallback that powers keyless (fake-provider) deployments."""
 
+import hashlib
 from typing import cast
 
 from gg_agents.audit import build_turn_audit_event
@@ -786,6 +787,18 @@ async def test_turn_audit_event_records_provenance():
     assert event.payload["model"] == settings.providers.llm_model
     assert event.payload["prompt_hash"] == final["prompt_hash"]
     assert event.payload["verdict"] == "grounded"
+    # The immutable record carries the answer itself and what it rested on.
+    assert event.payload["answer"] == final["answer"]
+    assert event.payload["answer_sha256"] == hashlib.sha256(final["answer"].encode()).hexdigest()
+    citation = event.payload["citations"][0]
+    assert citation["doc_key"] == "SOP-004"
+    assert citation["marker"] == 1
+    evidence = event.payload["evidence"]
+    assert [e["parent_id"] for e in evidence] == [p["parent_id"] for p in final["parents"]]
+    assert (
+        evidence[0]["text_sha256"]
+        == hashlib.sha256(final["parents"][0]["text"].encode()).hexdigest()
+    )
 
 
 async def test_turn_emits_spans_for_each_node():
