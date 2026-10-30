@@ -17,7 +17,8 @@ from datetime import date, datetime
 # alternative that matches at a position wins, so REQ-017 and SUP-004 are read
 # as entities before the generic document-key form can claim them.
 #   requirement  REQ-017 (a row inside TM-100, answered from the graph)
-#   entity       SUP-004, DO-012, VTP-003 (matrix entities, never a corpus file)
+#   entity       SUP-004, DO-012, VTP-003 (matrix entities) and the BOM part
+#                numbers MP-100, HSG-100, FT-210 (components); never a corpus file
 #   record       CAPA-2025-014, NCR-2024-001, MDR-2025-003, C-2025-0142
 #   event_doc    AUD-2024-01, MRM-2025-01, ASR-2024-01, EMDR-0001, DHR-L250007
 #   document     SOP-013, QM-001 and compound keys like WI-MFG-014; matching the
@@ -25,7 +26,7 @@ from datetime import date, datetime
 _IDENTIFIER_RE = re.compile(
     r"\b(?:"
     r"(?P<requirement>REQ-\d+)"
-    r"|(?P<entity>(?:SUP|DO|VTP)-\d{3})"
+    r"|(?P<entity>(?:SUP|DO|VTP|MP|HSG|HDR|FT|PCB|BAT|FW)-\d{3})"
     r"|(?P<record>(?:CAPA|NCR|MDR)-\d{4}(?:-\d+)?|C-\d{4}-\d{3,})"
     r"|(?P<event_doc>(?:AUD|MRM|ASR)-\d{4}-\d{2}|EMDR-\d{4}|DHR-[A-Z0-9]+)"
     r"|(?P<document>[A-Z]{2,6}(?:-[A-Z]{2,6})*-\d{3})"

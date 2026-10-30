@@ -108,6 +108,22 @@ class TestExtractScope:
         assert extract_scope("Which supplier is SUP-004?").doc_key is None
         assert extract_scope("Which report verifies REQ-017?").doc_key is None
 
+    def test_part_numbers_do_not_scope(self):
+        # BOM part numbers share the document-key shape but name no corpus
+        # file; scoping to one returned no evidence for every supplier question.
+        for question in (
+            "Which supplier provides the Titanium Enclosure (HSG-100)?",
+            "Which supplier provides the Catheter Port Assembly (HDR-200)?",
+            "Which supplier provides the Feedthrough Assembly (FT-210)?",
+            "Which supplier provides the Hybrid Circuit Assembly (PCB-300)?",
+            "Which supplier provides the Li/CFx Battery (BAT-400)?",
+            "What does the MP-100 pump firmware FW-500 control?",
+        ):
+            assert extract_scope(question).doc_key is None, question
+        assert extract_scope("Which supplier audit covered HSG-100 in ASR-2024-01?").doc_key == (
+            "ASR-2024-01"
+        )
+
     def test_record_and_document_together_are_ambiguous(self):
         assert extract_scope("Was CAPA-2024-001 handled per SOP-004?").doc_key is None
 
