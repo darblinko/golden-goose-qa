@@ -26,8 +26,9 @@ record warehouse (Postgres), with every answer cited to document ID, revision an
   family, with a golden question set and seeded defects
   ([`packages/synthdata/`](packages/synthdata/)).
 - Runs a gated eval battery covering retrieval recall, answer grounding, citation precision and
-  recall, sentence support, routing accuracy and reranker noise. CI runs it on the 30-question
-  smoke set for each push and pull request, and a nightly workflow runs the full golden set
+  recall, sentence support, count answer correctness, routing accuracy and reranker noise. CI
+  runs it on the 30-question smoke set for each push and pull request, and a nightly workflow
+  runs the full golden set
   ([`.github/workflows/`](.github/workflows/), [ADR 0019](docs/adr/0019-eval-battery-lexical-gates.md)).
 
 ## How it works
