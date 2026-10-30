@@ -9,19 +9,22 @@ import StepTrace from "./StepTrace";
 export default function ChatView({
   messages,
   liveTurn,
+  busy,
   error,
   onSend,
   onMarkerClick,
 }: {
   messages: Message[];
   liveTurn: LiveTurn | null;
+  // A turn is streaming somewhere, possibly in another thread.
+  busy: boolean;
   error: string | null;
   onSend: (content: string) => void;
-  onMarkerClick: (marker: number) => void;
+  onMarkerClick: (messageId: string, marker: number) => void;
 }) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const streaming = liveTurn !== null;
+  const streaming = liveTurn !== null || busy;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -39,7 +42,7 @@ export default function ChatView({
     <main className="chat-col">
       <div className="chat-scroll" ref={scrollRef}>
         <div className="chat-inner">
-          {messages.length === 0 && !streaming ? (
+          {messages.length === 0 && liveTurn === null ? (
             <div className="empty-state">
               <h2>Ask the quality system</h2>
               <p>
@@ -53,7 +56,7 @@ export default function ChatView({
             <MessageBubble
               key={message.id}
               message={message}
-              onMarkerClick={onMarkerClick}
+              onMarkerClick={(marker) => onMarkerClick(message.id, marker)}
             />
           ))}
           {liveTurn ? (
