@@ -45,7 +45,7 @@ async def test_processing_takes_the_document_lock_before_any_stage():
         log.append("stages")
         return "result"
 
-    pipeline._process_stages = _stages  # type: ignore[method-assign]
+    pipeline._process_stages = _stages  # type: ignore[method-assign,assignment]
     registration = _Registration(
         document_id="doc-1", version_id="ver-1", doc_key="SOP-004", short_circuit=None
     )
