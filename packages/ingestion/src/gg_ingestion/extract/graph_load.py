@@ -1,7 +1,9 @@
 """Idempotent Neo4j loading of extraction output.
 
 Everything is MERGE-based: nodes on their key property, edges after merging
-both endpoints, so re-deriving the same corpus is a no-op. Labels and
+both endpoints. replace_graph wipes the derived graph and loads the new one in
+a single write transaction, so a failed load leaves the previous graph intact
+instead of an empty or partial one. Labels and
 relationship types are interpolated into Cypher only from the whitelists in
 extract.model — parameters carry all data values.
 """
@@ -9,8 +11,7 @@ extract.model — parameters carry all data values.
 from collections import defaultdict
 from typing import Any
 
-from gg_common.graphstore import run_write
-from neo4j import AsyncDriver
+from neo4j import AsyncDriver, AsyncManagedTransaction
 
 from gg_ingestion.extract.model import NODE_KEY_PROPERTY, RELATIONSHIP_TYPES, Edge, Node
 
@@ -96,17 +97,19 @@ def edge_conflicts(edges: list[Edge]) -> list[str]:
     return conflicts
 
 
-async def load_nodes(driver: AsyncDriver, nodes: list[Node]) -> None:
+WIPE_DERIVED_QUERY = "MATCH (n) WHERE NOT n:SchemaMigration DETACH DELETE n"
+
+Statement = tuple[str, dict[str, Any]]
+
+
+def node_statements(nodes: list[Node]) -> list[Statement]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for node in nodes:
         grouped[node.label].append({"key": node.key, "properties": node.properties})
-    for label, rows in grouped.items():
-        await run_write(driver, node_query(label), {"rows": rows})
+    return [(node_query(label), {"rows": rows}) for label, rows in grouped.items()]
 
 
-async def load_edges(driver: AsyncDriver, edges: list[Edge]) -> list[str]:
-    """Load edges idempotently and return any equal-confidence conflicts so the
-    caller can surface them (the loader keeps the first, deterministically)."""
+def edge_statements(edges: list[Edge]) -> list[Statement]:
     grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for edge in edges:
         grouped[(edge.rel_type, edge.start_label, edge.end_label)].append(
@@ -116,6 +119,25 @@ async def load_edges(driver: AsyncDriver, edges: list[Edge]) -> list[str]:
                 "properties": edge_properties(edge),
             }
         )
-    for (rel_type, start_label, end_label), rows in grouped.items():
-        await run_write(driver, edge_query(rel_type, start_label, end_label), {"rows": rows})
+    return [
+        (edge_query(rel_type, start_label, end_label), {"rows": rows})
+        for (rel_type, start_label, end_label), rows in grouped.items()
+    ]
+
+
+async def replace_graph(driver: AsyncDriver, nodes: list[Node], edges: list[Edge]) -> list[str]:
+    """Replace the derived graph (everything but migration tracking) with these
+    nodes and edges in one write transaction. Returns equal-confidence edge
+    conflicts so the caller can surface them (the loader keeps the first,
+    deterministically). Statements are built before the transaction opens, so
+    an unknown relationship type fails before anything is deleted."""
+    statements = [(WIPE_DERIVED_QUERY, {}), *node_statements(nodes), *edge_statements(edges)]
+
+    async def work(tx: AsyncManagedTransaction) -> None:
+        for query, parameters in statements:
+            result = await tx.run(query, parameters)
+            await result.consume()
+
+    async with driver.session() as session:
+        await session.execute_write(work)
     return edge_conflicts(edges)

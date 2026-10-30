@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from datetime import date
 
 from gg_common.audit import AuditEvent, write_audit_event
-from gg_common.graphstore import run_write
 from gg_common.objectstore import ObjectStore
 from gg_common.settings import AppSettings
 from neo4j import AsyncDriver
@@ -20,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gg_ingestion.artifacts import artifact_key
 from gg_ingestion.extract.extractors import extract_document
-from gg_ingestion.extract.graph_load import load_edges, load_nodes
+from gg_ingestion.extract.graph_load import replace_graph
 from gg_ingestion.extract.model import DocExtraction, Edge, Node
 from gg_ingestion.extract.warehouse_load import load_registers
 from gg_ingestion.models import DocMeta, ParsedBlock, ParsedDocument
@@ -116,6 +115,17 @@ def document_node(doc: RegistryDocument) -> Node:
     )
 
 
+def _graph_assertions(
+    documents: list[RegistryDocument], extractions: list[DocExtraction]
+) -> tuple[list[Node], list[Edge]]:
+    nodes: list[Node] = [document_node(doc) for doc in documents]
+    edges: list[Edge] = []
+    for extraction in extractions:
+        nodes.extend(extraction.nodes)
+        edges.extend(extraction.edges)
+    return nodes, edges
+
+
 async def derive_corpus(
     *,
     settings: AppSettings,
@@ -135,6 +145,13 @@ async def derive_corpus(
         )
         extractions.append(extract_document(parsed_from_artifact(artifact), known))
 
+    all_nodes, all_edges = _graph_assertions(documents, extractions)
+    edge_conflicts: list[str] = []
+
+    # Registers and graph are rebuildable projections of the same documents.
+    # The register rows stay uncommitted until the graph transaction commits,
+    # so a failed graph load rolls both back and leaves the previous, mutually
+    # consistent projections in place.
     async with session_factory() as session:
         inserted = await load_registers(session, extractions)
         await write_audit_event(
@@ -145,22 +162,8 @@ async def derive_corpus(
                 payload={"documents": len(documents), "rows": inserted},
             ),
         )
-        await session.commit()
-
-    all_nodes: list[Node] = [document_node(doc) for doc in documents]
-    all_edges: list[Edge] = []
-    for extraction in extractions:
-        all_nodes.extend(extraction.nodes)
-        all_edges.extend(extraction.edges)
-    edge_conflicts: list[str] = []
-    if graph is not None:
-        # Like the registers, the graph is a rebuildable projection: wipe
-        # derived data (everything but migration tracking) so removed
-        # references never linger across re-derives.
-        await run_write(graph, "MATCH (n) WHERE NOT n:SchemaMigration DETACH DELETE n")
-        await load_nodes(graph, all_nodes)
-        edge_conflicts = await load_edges(graph, all_edges)
-        async with session_factory() as session:
+        if graph is not None:
+            edge_conflicts = await replace_graph(graph, all_nodes, all_edges)
             await write_audit_event(
                 session,
                 AuditEvent(
@@ -169,7 +172,7 @@ async def derive_corpus(
                     payload={"nodes": len(all_nodes), "edges": len(all_edges)},
                 ),
             )
-            await session.commit()
+        await session.commit()
 
     dangling = {e.doc_key: e.dangling_refs for e in extractions if e.dangling_refs}
     warnings = tuple(
