@@ -94,30 +94,42 @@ def sentence_support(answer: str, evidence_texts: list[str]) -> float:
     return sum(scores) / len(scores) if scores else 0.0
 
 
-def _cited_indices(sentence: str, n_sources: int) -> list[int]:
-    """Zero-based evidence indices a sentence's [n] markers point at, in range."""
+def _cited_references(sentence: str, n_sources: int) -> tuple[list[int], bool]:
+    """Zero-based evidence indices a sentence's in-range [n] markers point at,
+    and whether it also carries a marker outside the window."""
     seen: list[int] = []
+    has_invalid = False
     for marker in _MARKER_RE.findall(sentence):
         index = int(marker) - 1
-        if 0 <= index < n_sources and index not in seen:
+        if not 0 <= index < n_sources:
+            has_invalid = True
+        elif index not in seen:
             seen.append(index)
-    return seen
+    return seen, has_invalid
 
 
 def cited_sentence_support(answer: str, evidence_texts: list[str]) -> float:
     """Like sentence_support, but each sentence is scored only against the
-    sources its own [n] markers cite (falling back to the whole window when a
-    sentence carries no marker). Citing the wrong document then lowers support
-    even if the right document sits elsewhere in the window."""
+    sources its own [n] markers cite. A sentence with no marker falls back to
+    the whole window; a marker outside the window cites nothing and scores 0,
+    so an invalid reference never borrows credit from unrelated evidence.
+    Citing the wrong document lowers support even if the right document sits
+    elsewhere in the window."""
     if not evidence_texts:
         return 0.0
     normalized = _TRAILING_MARKER_RE.sub(r"\3\1", answer)
     scores: list[float] = []
     for raw_sentence in _SENTENCE_SPLIT_RE.split(normalized):
-        indices = _cited_indices(raw_sentence, len(evidence_texts))
+        indices, has_invalid = _cited_references(raw_sentence, len(evidence_texts))
         sentence = _MARKER_RE.sub("", raw_sentence)
         if not _scoreable(sentence):
             continue
-        sources = [evidence_texts[i] for i in indices] if indices else evidence_texts
-        scores.append(max(_entails(sentence, source) for source in sources))
+        if not indices:
+            scores.append(0.0 if has_invalid else _best(sentence, evidence_texts))
+            continue
+        scores.append(_best(sentence, [evidence_texts[i] for i in indices]))
     return sum(scores) / len(scores) if scores else 0.0
+
+
+def _best(sentence: str, sources: list[str]) -> float:
+    return max(_entails(sentence, source) for source in sources)

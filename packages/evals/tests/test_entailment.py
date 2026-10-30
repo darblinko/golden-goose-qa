@@ -118,8 +118,18 @@ def test_cited_support_falls_back_to_the_window_for_uncited_sentences():
     assert cited_sentence_support(answer, EVIDENCE) == 1.0
 
 
-def test_out_of_range_citation_marker_falls_back_to_the_window():
-    # [9] points past the window; treat the sentence as uncited rather than
-    # scoring it against an empty source set (which would read as unsupported).
+def test_out_of_range_citation_marker_scores_as_unsupported():
+    # [9] points past the window. A sentence whose only marker is invalid cites
+    # nothing that exists, so unrelated evidence elsewhere must not rescue it.
     answer = "Effectiveness verification is required within 90 days of closure. [9]"
+    assert cited_sentence_support(answer, EVIDENCE) == 0.0
+
+
+def test_exact_evidence_sentence_with_invalid_marker_gets_no_credit():
+    answer = "Effectiveness verification is required within 90 days of closure. [999]"
+    assert cited_sentence_support(answer, EVIDENCE) == 0.0
+
+
+def test_valid_marker_still_scores_beside_an_invalid_one():
+    answer = "Effectiveness verification is required within 90 days of closure. [1][999]"
     assert cited_sentence_support(answer, EVIDENCE) == 1.0
