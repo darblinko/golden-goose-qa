@@ -315,6 +315,43 @@ class TestWarehousePlan:
         assert plan.sql is None
         assert plan.saved is None
 
+    def test_month_qualifier_bounds_the_month(self):
+        plan = warehouse_plan("How many CAPAs were opened in March 2025?")
+        assert plan.sql == (
+            "SELECT count(*) AS total FROM registers.v_capa_register"
+            " WHERE opened >= '2025-03-01' AND opened < '2025-04-01'"
+        )
+        assert plan.title == "Count of CAPAs in March 2025"
+        assert validate_select(plan.sql, allowed_relations=ALLOWED_RELATIONS)
+
+    def test_december_window_ends_at_the_next_year(self):
+        plan = warehouse_plan("How many complaints were received in December 2024?")
+        assert plan.sql is not None
+        assert "received >= '2024-12-01' AND received < '2025-01-01'" in plan.sql
+
+    def test_closed_in_year_filters_the_closing_date(self):
+        plan = warehouse_plan("How many CAPAs were closed in 2025?")
+        assert plan.sql == (
+            "SELECT count(*) AS total FROM registers.v_capa_register"
+            " WHERE NOT is_open AND closed >= '2025-01-01' AND closed < '2026-01-01'"
+        )
+        assert plan.title == "Count of CAPAs closed in 2025"
+
+    def test_unsupported_subject_qualifier_refuses(self):
+        plan = warehouse_plan("How many complaints involved Pump X?")
+        assert plan.sql is None
+        assert plan.saved is None
+
+    def test_two_years_refuse(self):
+        plan = warehouse_plan("How many CAPAs were opened between 2024 and 2025?")
+        assert plan.sql is None
+        assert plan.saved is None
+
+    def test_since_year_refuses(self):
+        plan = warehouse_plan("How many NCRs were opened since 2024?")
+        assert plan.sql is None
+        assert plan.saved is None
+
 
 class TestGraphPlan:
     def test_req_id_traces_the_requirement(self):

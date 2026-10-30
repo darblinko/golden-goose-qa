@@ -103,6 +103,132 @@ _AGE_DAYS_RE = re.compile(
     re.IGNORECASE,
 )
 
+_MONTHS = (
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+)
+_MONTH_YEAR_RE = re.compile(r"\b(" + "|".join(_MONTHS) + r")\s+(20\d{2})\b", re.IGNORECASE)
+_CLOSED_DATE_RE = re.compile(
+    r"\b(?:closed|resolved)\s+(?:in|during)\s+(?:[a-z]+\s+)?20\d{2}\b", re.IGNORECASE
+)
+
+# Every word a count question may contain. A count applies only the predicates
+# above (target, open/closed, one year or month window, an age threshold); any
+# other word could be a qualifier the SQL would silently drop ("involved Pump
+# X", "since 2024", "as of"), so the plan refuses instead.
+_COUNT_VOCABULARY = frozenset(
+    [
+        "how",
+        "many",
+        "count",
+        "total",
+        "number",
+        "of",
+        "the",
+        "a",
+        "an",
+        "in",
+        "during",
+        "for",
+        "were",
+        "was",
+        "are",
+        "is",
+        "there",
+        "have",
+        "has",
+        "been",
+        "did",
+        "do",
+        "we",
+        "our",
+        "all",
+        "currently",
+        "still",
+        "now",
+        "so",
+        "far",
+        "overall",
+        "open",
+        "opened",
+        "unclosed",
+        "outstanding",
+        "closed",
+        "resolved",
+        "received",
+        "submitted",
+        "filed",
+        "reported",
+        "logged",
+        "raised",
+        "initiated",
+        "older",
+        "more",
+        "greater",
+        "than",
+        "over",
+        "past",
+        "exceeding",
+        "day",
+        "days",
+        "complaint",
+        "complaints",
+        "ncr",
+        "ncrs",
+        "nonconformance",
+        "nonconforming",
+        "report",
+        "reports",
+        "capa",
+        "capas",
+        "corrective",
+        "action",
+        "actions",
+        "mdr",
+        "mdrs",
+        "medical",
+        "device",
+    ]
+) | frozenset(_MONTHS)
+
+
+def _has_unsupported_qualifier(question: str) -> bool:
+    for word in re.findall(r"[a-z]+|\d+", question.lower()):
+        if word.isdigit():
+            continue  # years and day counts; each is validated by its own regex
+        if word not in _COUNT_VOCABULARY:
+            return True
+    return False
+
+
+def _date_window(question: str) -> tuple[date, date, str] | None:
+    """The one year or month the question names, as [start, end) plus a label.
+    Raises ValueError when it names more than one year."""
+    years = set(_YEAR_RE.findall(question))
+    if not years:
+        return None
+    if len(years) > 1:
+        raise ValueError("more than one year")
+    month_match = _MONTH_YEAR_RE.search(question)
+    if month_match:
+        month = _MONTHS.index(month_match.group(1).lower()) + 1
+        year = int(month_match.group(2))
+        start = date(year, month, 1)
+        end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        return start, end, f"{_MONTHS[month - 1].capitalize()} {year}"
+    year = int(years.pop())
+    return date(year, 1, 1), date(year + 1, 1, 1), str(year)
+
 
 def route_override(question: str) -> str | None:
     """Return a pattern name when the question is unambiguous, else None.
@@ -300,20 +426,28 @@ def _count_plan_for(
     if wants_open and wants_closed:
         return _COUNT_REFUSAL  # contradictory; refuse rather than pick one
 
+    if _has_unsupported_qualifier(question):
+        return _COUNT_REFUSAL
+    try:
+        window = _date_window(question)
+    except ValueError:
+        return _COUNT_REFUSAL
+    by_closing_date = window is not None and bool(_CLOSED_DATE_RE.search(question))
+
     if wants_open:
         conditions.append("is_open")
         status_prefix = "open "
     elif wants_closed:
         conditions.append("NOT is_open")
-        status_prefix = "closed "
+        status_prefix = "" if by_closing_date else "closed "
 
-    year_match = _YEAR_RE.search(question)
-    if year_match:
-        # int() guarantees the interpolated values are digits; the guard
-        # re-validates the whole statement before execution.
-        year = int(year_match.group(1))
-        conditions.append(f"{date_column} >= '{year}-01-01' AND {date_column} < '{year + 1}-01-01'")
-        suffix_qualifiers.append(f"in {year}")
+    if window is not None:
+        start, end, window_label = window
+        # The bounds are date objects formatted by isoformat(), so only digits
+        # and hyphens reach the SQL; the guard re-validates the statement.
+        column = "closed" if by_closing_date else date_column
+        conditions.append(f"{column} >= '{start.isoformat()}' AND {column} < '{end.isoformat()}'")
+        suffix_qualifiers.append(f"{'closed ' if by_closing_date else ''}in {window_label}")
 
     if age_match:
         days = int(age_match.group(1))
