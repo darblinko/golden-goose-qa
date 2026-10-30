@@ -35,16 +35,39 @@ def _sql_identifier(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _dollar_tag(body: str) -> str:
+    """A dollar-quote tag that does not occur in the quoted body, so a value
+    containing $$ cannot close the block early."""
+    tag, n = "$gg$", 0
+    while tag in body:
+        n += 1
+        tag = f"$gg{n}$"
+    return tag
+
+
+def _create_login_role_sql(role: str, password: str) -> str:
+    """Idempotent CREATE ROLE ... LOGIN PASSWORD inside a DO block. op.execute
+    runs the string through text(), so colons are escaped against bind-param
+    parsing; text() renders them back as plain colons."""
+    literal = _sql_literal(password).replace(":", "\\:")
+    body = f"""
+        BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN
+                CREATE ROLE {role} LOGIN PASSWORD {literal};
+            END IF;
+        END
+        """
+    tag = _dollar_tag(body)
+    return f"DO {tag}{body}{tag};"
+
+
 def upgrade() -> None:
     pg = PostgresSettings()
-    app_password = _sql_literal(pg.password.get_secret_value())
+    op.execute(_create_login_role_sql("gg_app", pg.password.get_secret_value()))
     op.execute(
-        f"""
+        """
         DO $$
         BEGIN
-            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'gg_app') THEN
-                CREATE ROLE gg_app LOGIN PASSWORD {app_password};
-            END IF;
             IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sql_tool_ro') THEN
                 CREATE ROLE sql_tool_ro NOLOGIN;
             END IF;
