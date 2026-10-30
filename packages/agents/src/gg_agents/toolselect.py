@@ -245,6 +245,24 @@ def _has_unsupported_qualifier(question: str) -> bool:
     return False
 
 
+_NUMERIC_TOKEN_RE = re.compile(r"\d+(?:[-/.]\d+)*")
+_WINDOW_YEAR_RE = re.compile(r"20\d{2}")
+_MONTH_RE = re.compile(r"\b(?:" + "|".join(_MONTHS) + r")\b", re.IGNORECASE)
+
+
+def _has_unrepresented_date_term(question: str) -> bool:
+    """True when a number or month name in the question is not one the count
+    applies: a standalone 20xx year, a "<month> <year>" window, or the day
+    threshold of an age qualifier. "in 1999", "in March" and "in 2025-03-01"
+    all name a date the SQL would otherwise drop or widen."""
+    masked = question
+    for pattern in (_AGE_DAYS_RE, _MONTH_YEAR_RE):
+        masked = pattern.sub(lambda m: " " * len(m.group(0)), masked)
+    if _MONTH_RE.search(masked):
+        return True
+    return any(not _WINDOW_YEAR_RE.fullmatch(token) for token in _NUMERIC_TOKEN_RE.findall(masked))
+
+
 def _date_window(question: str) -> tuple[date, date, str] | None:
     """The one year or month the question names, as [start, end) plus a label.
     Raises ValueError when it names more than one year."""
@@ -464,7 +482,7 @@ def _count_plan_for(
     if wants_open and wants_closed:
         return _COUNT_REFUSAL  # contradictory; refuse rather than pick one
 
-    if _has_unsupported_qualifier(question):
+    if _has_unsupported_qualifier(question) or _has_unrepresented_date_term(question):
         return _COUNT_REFUSAL
     try:
         window = _date_window(question)

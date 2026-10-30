@@ -412,6 +412,26 @@ class TestWarehousePlan:
         assert plan.sql is None
         assert plan.saved is None
 
+    def test_unrepresented_date_qualifiers_refuse(self):
+        # Each names a date the count cannot apply: a year outside the 20xx
+        # window form, a month with no year, and a full date. None may fall
+        # back to an all-time or whole-year count.
+        for question in (
+            "How many complaints in 1999?",
+            "How many complaints in March?",
+            "How many complaints in 2025-03-01?",
+            "How many complaints were received on 03/01/2025?",
+            "How many CAPAs were opened in 2025 Q1?",
+        ):
+            plan = warehouse_plan(question)
+            assert (plan.sql, plan.saved) == (None, None), question
+
+    def test_year_and_age_numbers_are_both_represented(self):
+        plan = warehouse_plan("How many complaints received in 2025 are older than 30 days?")
+        assert plan.sql is not None
+        assert "age_days > 30" in plan.sql
+        assert "received >= '2025-01-01'" in plan.sql
+
 
 class TestGraphPlan:
     def test_req_id_traces_the_requirement(self):
