@@ -487,6 +487,23 @@ async def test_training_question_walks_the_graph():
     assert final["verdict"] == "grounded"
 
 
+async def test_historical_graph_question_is_refused():
+    # The graph is a projection of the current corpus; it has no temporal
+    # filter. A training question with an as-of date must refuse rather than
+    # answer with today's training status.
+    retriever = StubRetriever([], [])
+    walker = StubGraphWalker(TRACE_RESULT)
+    deps = make_deps({}, retriever, llm_is_fake=True, graph=walker)
+    graph = build_agent_graph(deps)
+    final = await graph.ainvoke(initial_state("Who was trained on SOP-001 as of 2024-01-01?"))
+    assert final["pattern"] == "trace"
+    assert final["as_of"] == "2024-01-01"
+    assert walker.calls == []
+    assert final["verdict"] == "insufficient_evidence"
+    assert final["citations"] == []
+    assert "as-of" in final["answer"]
+
+
 async def test_missing_graph_anchor_answers_not_in_corpus_not_grounded():
     # A training question for a document absent from the graph (the WI-MFG-014
     # acceptance case) must resolve to insufficient_evidence, never a grounded

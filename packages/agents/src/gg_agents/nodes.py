@@ -580,6 +580,14 @@ class AgentNodes:
     async def graph_walk(self, state: AgentState) -> AgentState:
         if self.deps.graph is None:
             return self._tool_failure("graph_walk", "knowledge graph is not configured")
+        if state.get("as_of"):
+            # The graph is rebuilt from the current corpus and carries no
+            # validity windows, so a traversal can only describe today.
+            return self._tool_failure(
+                "graph_walk",
+                f"as-of {state['as_of']} was requested, and knowledge graph traversals "
+                "describe only the current corpus",
+            )
         plan = toolselect.graph_plan(state["question"])
         anchor = plan.argument or ""
         if (
