@@ -138,6 +138,24 @@ development secrets is still set (`_reject_dev_secrets_in_deployed_envs` in
 `packages/common/src/gg_common/settings.py`).
 Operating procedures, backup and restore are in [`docs/runbooks/`](docs/runbooks/).
 
+### FMEA Action Priority table
+
+The corpus generator and the FMEA register both compute Action Priority (AP) from severity,
+occurrence and detection through one lookup table. The AIAG-VDA FMEA Handbook Action Priority
+table is copyrighted and is not included in this repository. To use it, transcribe it from your
+licensed copy of the handbook into a JSON file and set `GG_AP_TABLE_PATH` to that file's path
+for every process (generator, ingestion, API). The file format is documented in
+[`packages/common/src/gg_common/actionpriority.py`](packages/common/src/gg_common/actionpriority.py);
+the file is validated on load, and a missing or malformed file stops the process with an error
+that names the defect.
+
+When `GG_AP_TABLE_PATH` is unset, the bundled synthetic example table
+[`ap_table_synthetic_example.json`](packages/common/src/gg_common/data/ap_table_synthetic_example.json)
+is used and a warning is logged. The example was invented for the tests and the demo corpus. It
+is not the AIAG-VDA table, and its AP values must not be used for real FMEA work. Generate and
+ingest a corpus with the same table, otherwise every FMEA row whose AP differs between the two
+tables is reported as a mismatch.
+
 ## Project layout
 
 ```

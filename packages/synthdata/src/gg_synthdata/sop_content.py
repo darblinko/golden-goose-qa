@@ -99,7 +99,7 @@ SOPS: tuple[ProcedureSpec, ...] = (
             "Perform hazard analysis and estimate risk for each hazardous "
             "situation using severity and probability criteria in the plan.",
             "Perform design and process FMEAs; assign action priority per the "
-            "AIAG-VDA action priority table.",
+            "approved action priority table.",
             "Implement risk controls in the order: inherent safety by design, "
             "protective measures, information for safety.",
             "Verify implementation and effectiveness of each risk control and "

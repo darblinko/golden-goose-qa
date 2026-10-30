@@ -84,7 +84,7 @@ smoke eval as a gate; audit log rows present and hash-chained for every turn.
   extraction from trace matrices, form fields, revision tables, References sections, inline regex
   (ID bank + validation against registry); per-edge provenance + confidence; DocumentRevision
   temporal model.
-- FMEA subgraph per the FMEA labels in architecture §8; AIAG-VDA Action Priority table with tests
+- FMEA subgraph per the FMEA labels in architecture §8; Action Priority lookup from a user-supplied table file (the AIAG-VDA table is not shipped), with tests
   (`gg_common.actionpriority`) and methodology profiles; AP recompute + mismatch flag.
 - `registers` warehouse: NCR/CAPA/complaint/deviation/training/FMEA tables + curated read-only
   views; text-to-SQL tool under `sql_tool_ro` with result citation (table/view + filter echo).

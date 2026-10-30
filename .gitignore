@@ -22,6 +22,8 @@ out/
 
 # Data and artifacts
 data/
+# Package data shipped with gg_common (the synthetic example AP table).
+!packages/common/src/gg_common/data/
 artifacts/
 .nightly-corpus/
 eval-trends/

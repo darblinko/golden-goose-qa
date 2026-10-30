@@ -38,7 +38,7 @@ AUDIT_CHECKS: tuple[AuditCheck, ...] = (
     AuditCheck(
         check_id="fmea_ap_mismatches",
         title="FMEA action-priority mismatches",
-        description="FMEA rows whose recorded AP disagrees with the AIAG-VDA table.",
+        description="FMEA rows whose recorded AP disagrees with the configured AP table.",
         kind="gap",
         source="warehouse",
         ref="fmea_ap_mismatches",

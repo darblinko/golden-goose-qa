@@ -216,7 +216,7 @@ SAVED_QUERIES: dict[str, SavedQuery] = {
     ),
     "fmea_ap_mismatches": SavedQuery(
         title="FMEA rows where recorded AP disagrees with computed AP",
-        description="Action priority recorded in the sheet differs from the AIAG-VDA table.",
+        description="Action priority recorded in the sheet differs from the configured AP table.",
         sql=(
             "SELECT doc_key, row_id, item, failure_mode, severity, occurrence, detection,"
             " ap_recorded, ap_computed FROM registers.v_fmea_register"

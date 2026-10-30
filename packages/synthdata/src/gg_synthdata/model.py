@@ -90,7 +90,7 @@ class FmeaRow:
     occurrence: int
     detection: int
     ap_recorded: str  # H | M | L as written in the sheet
-    ap_correct: str  # per the AIAG-VDA table (may differ when a defect is seeded)
+    ap_correct: str  # per the configured AP table (may differ when a defect is seeded)
     prevention_control: str
     detection_control: str
     mitigation_refs: tuple[str, ...] = ()
@@ -272,7 +272,7 @@ class World:
 
 
 def ap_from_sod(severity: int, occurrence: int, detection: int) -> str:
-    """Action priority per the full AIAG-VDA 1st edition table.
+    """Action priority per the configured AP table (GG_AP_TABLE_PATH).
 
     Delegates to the canonical implementation in gg_common so generated
     sheets and the warehouse AP recompute can never disagree on the table.

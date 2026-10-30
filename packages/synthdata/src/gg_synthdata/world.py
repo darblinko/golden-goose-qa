@@ -1444,7 +1444,7 @@ def build_world(seed: int = 42) -> World:
             "DEF-002",
             "ap_mismatch",
             "DFMEA-100 row 3 (FT-210 hermeticity loss at braze joint, S=9 O=4 D=5) "
-            "records action priority M although the AIAG-VDA table yields H.",
+            "records action priority M although the action priority table yields H.",
             ("DFMEA-100",),
             f"Row 3 of DFMEA-100 records AP '{ap_row.ap_recorded}' but severity "
             f"{ap_row.severity}, occurrence {ap_row.occurrence}, detection "
