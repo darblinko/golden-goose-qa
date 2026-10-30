@@ -43,7 +43,11 @@ class AnswerResult:
 _COUNT_PATTERN = "counts_aggregates"
 _LEADING_COUNT_RE = re.compile(r"^\s*(\d[\d,]*)\b")
 _MARKER_RE = re.compile(r"\[\d+\]")
-_NUMBER_RE = re.compile(r"\d[\d,]*")
+# A standalone integer: not part of a decimal (1.9), an identifier
+# (CAPA-2025-009), a date (14-Mar-2025) or a word.
+_STANDALONE_INT_RE = re.compile(
+    r"(?<![\w.\-/])\d{1,3}(?:,\d{3})+(?![\w\-/]|\.\d)|(?<![\w.,\-/])\d+(?![\w,\-/]|\.\d)"
+)
 
 
 def expected_count(item: EvalItem) -> int | None:
@@ -61,9 +65,33 @@ def answer_correct(item: EvalItem, state: dict[str, Any]) -> bool | None:
         return None
     if state.get("verdict") != "grounded":
         return False
-    prose = _MARKER_RE.sub(" ", state.get("answer") or "")
-    stated = {int(n.replace(",", "")) for n in _NUMBER_RE.findall(prose)}
-    return expected in stated
+    structured = _tool_count(state.get("parents") or [])
+    if structured is not None and structured != expected:
+        return False
+    return stated_counts(item.question, state.get("answer") or "") == {expected}
+
+
+def _integers(text: str) -> set[int]:
+    return {int(n.replace(",", "")) for n in _STANDALONE_INT_RE.findall(text)}
+
+
+def stated_counts(question: str, answer: str) -> set[int]:
+    """The counts an answer asserts: its standalone integers, less citation
+    markers and numbers the question itself carries (a year). A correct answer
+    asserts exactly one count."""
+    return _integers(_MARKER_RE.sub(" ", answer)) - _integers(question)
+
+
+def _tool_count(parents: list[dict[str, Any]]) -> int | None:
+    """The single integer cell of a one-row, one-column tool table, the shape
+    a warehouse count returns; None for any other evidence."""
+    if not parents or parents[0].get("doc_type") != "tool_result":
+        return None
+    lines = parents[0].get("text", "").splitlines()
+    body = lines[2:] if len(lines) > 1 and lines[1].startswith("Source:") else []
+    if len(body) != 2 or " | " in body[0] or not body[1].strip().isdigit():
+        return None
+    return int(body[1].strip())
 
 
 @dataclass(frozen=True)

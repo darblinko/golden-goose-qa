@@ -198,6 +198,44 @@ def test_count_answer_marker_or_year_is_not_the_number():
     ).correct
 
 
+def test_count_inside_a_decimal_is_not_the_count():
+    item = COUNT_ITEM.model_copy(update={"answer": "9 CAPAs were opened in 2025."})
+    assert not score_final_state(item, _count_state("There were 1.9 CAPAs in 2025. [1]")).correct
+
+
+def test_count_inside_an_identifier_is_not_the_count():
+    item = COUNT_ITEM.model_copy(update={"answer": "9 CAPAs were opened in 2025."})
+    state = _count_state("12 CAPAs were opened in 2025, the last CAPA-2025-009. [1]")
+    assert not score_final_state(item, state).correct
+
+
+def test_contradictory_counts_are_not_correct():
+    state = _count_state("17 CAPAs were opened in 2025, or perhaps 12. [1]")
+    assert not score_final_state(COUNT_ITEM, state).correct
+
+
+def test_structured_tool_count_must_match_the_golden_value():
+    tool_parent = {
+        "doc_type": "tool_result",
+        "text": "Count of CAPAs in 2025\nSource: registers warehouse (ad-hoc SQL)\ntotal\n12",
+    }
+    state = _count_state("17 CAPAs were opened in 2025. [1]") | {"parents": [tool_parent]}
+    assert not score_final_state(COUNT_ITEM, state).correct
+    matching = dict(tool_parent, text=tool_parent["text"].replace("\n12", "\n17"))
+    state = _count_state("17 CAPAs were opened in 2025. [1]") | {"parents": [matching]}
+    assert score_final_state(COUNT_ITEM, state).correct
+
+
+def test_extractive_tool_answer_is_scored_on_its_table():
+    answer = (
+        "Structured tool result:\nCount of CAPAs in 2025\n"
+        "Source: registers warehouse (ad-hoc SQL)\ntotal\n17 [1]"
+    )
+    parent = {"doc_type": "tool_result", "text": answer.split("\n", 1)[1].removesuffix(" [1]")}
+    state = _count_state(answer) | {"parents": [parent]}
+    assert score_final_state(COUNT_ITEM, state).correct
+
+
 def test_count_refusal_is_not_correct():
     state = _count_state("The records do not answer this.", verdict="insufficient_evidence")
     assert score_final_state(COUNT_ITEM, state).correct is False
