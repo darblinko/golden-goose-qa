@@ -69,8 +69,10 @@ async def indexed_documents(
     published ahead of its effective date is not derived early. Graph and
     registers describe present QMS state; superseded revisions contribute
     nothing here (their history already lives in the effective document's
-    revision-history table). Tombstoned documents are excluded, so a retired
-    source drops out of the graph and warehouse on the next rebuild."""
+    revision-history table). A document with no version in force today (only
+    a future revision, or only obsolete ones) is omitted. Tombstoned documents
+    are excluded, so a retired source drops out of the graph and warehouse on
+    the next rebuild."""
     rows = await session.execute(
         text(
             """
@@ -80,12 +82,10 @@ async def indexed_documents(
             FROM app.documents d
             JOIN app.document_versions v ON v.document_id = d.id
             WHERE v.pipeline_state = 'indexed' AND d.deleted_at IS NULL
-            ORDER BY d.doc_key,
-                     (v.status = 'effective'
-                      AND (v.effective_from IS NULL OR v.effective_from <= :today)
-                      AND (v.effective_to IS NULL OR v.effective_to > :today)) DESC,
-                     (v.status = 'effective') DESC,
-                     v.effective_from DESC NULLS LAST, v.created_at DESC
+              AND v.status = 'effective'
+              AND (v.effective_from IS NULL OR v.effective_from <= :today)
+              AND (v.effective_to IS NULL OR v.effective_to > :today)
+            ORDER BY d.doc_key, v.effective_from DESC NULLS LAST, v.created_at DESC
             """
         ),
         {"today": today or date.today()},
