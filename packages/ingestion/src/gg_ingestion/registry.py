@@ -455,11 +455,7 @@ def plan_supersessions(
     return plans
 
 
-async def reconcile_document_versions(
-    session: AsyncSession, document_id: str
-) -> list[SupersedePlan]:
-    """Apply plan_supersessions to the registry rows; the caller mirrors the
-    returned plans onto the search index payloads."""
+async def _indexed_versions(session: AsyncSession, document_id: str) -> list[VersionLifecycle]:
     rows = await session.execute(
         text(
             """
@@ -470,7 +466,7 @@ async def reconcile_document_versions(
         ),
         {"document_id": document_id},
     )
-    versions = [
+    return [
         VersionLifecycle(
             version_id=str(row.id),
             effective_from=row.effective_from,
@@ -480,7 +476,24 @@ async def reconcile_document_versions(
         )
         for row in rows
     ]
-    plans = plan_supersessions(versions)
+
+
+async def indexed_version_lifecycles(
+    session: AsyncSession, document_id: str
+) -> list[SupersedePlan]:
+    """The registry's recorded lifecycle for every indexed version of the
+    document, as plans the indexer can write onto the search index."""
+    return [
+        SupersedePlan(version_id=v.version_id, status=v.status, effective_to=v.effective_to)
+        for v in await _indexed_versions(session, document_id)
+    ]
+
+
+async def reconcile_document_versions(
+    session: AsyncSession, document_id: str
+) -> list[SupersedePlan]:
+    """Apply plan_supersessions to the registry rows and return the changes."""
+    plans = plan_supersessions(await _indexed_versions(session, document_id))
     for plan in plans:
         await session.execute(
             text(

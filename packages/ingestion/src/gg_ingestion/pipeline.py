@@ -523,10 +523,7 @@ class IngestionPipeline:
         restored = registration.tombstoned and await registry.restore_document(
             session, document_id=registration.document_id, version_id=registration.version_id
         )
-        # With this version indexed, settle which revision of the document is
-        # currently effective and close out the ones it superseded.
-        plans = await registry.reconcile_document_versions(session, registration.document_id)
-        await indexer.apply_supersessions(self.qdrant, self.settings.qdrant, plans)
+        await self._settle_lifecycles(session, registration.document_id)
         await write_audit_event(
             session,
             AuditEvent(
@@ -606,6 +603,15 @@ class IngestionPipeline:
             )
         ).one()
         return str(row.pipeline_state)
+
+    async def _settle_lifecycles(self, session: AsyncSession, document_id: str) -> None:
+        """Settle which revision of the document is in force, then write every
+        indexed version's lifecycle onto its points. index_chunks always writes
+        status=effective, so a reindexed superseded revision would otherwise
+        stay effective in the index while the registry records it obsolete."""
+        await registry.reconcile_document_versions(session, document_id)
+        lifecycles = await registry.indexed_version_lifecycles(session, document_id)
+        await indexer.apply_supersessions(self.qdrant, self.settings.qdrant, lifecycles)
 
     def _processing_config_hash(self) -> str:
         return processing_config_hash(self.settings)
