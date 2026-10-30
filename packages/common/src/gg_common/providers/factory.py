@@ -36,7 +36,7 @@ class ProviderSet:
 
     async def aclose(self) -> None:
         """Close every provider's network client, even if one close fails."""
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
         for provider in (self.llm, self.embeddings, self.rerank, self.ocr):
             try:
                 await provider.aclose()

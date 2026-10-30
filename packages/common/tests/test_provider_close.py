@@ -1,5 +1,7 @@
 """Provider adapters release their HTTP connection pools on aclose()."""
 
+from typing import Any
+
 import pytest
 from gg_common.providers.factory import ProviderSet, build_providers
 from gg_common.providers.real import (
@@ -23,8 +25,8 @@ def _real_providers() -> ProviderSet:
 
 async def test_provider_set_closes_every_real_client():
     providers = _real_providers()
-    clients = [p._client for p in (providers.llm, providers.embeddings, providers.rerank)]
-    clients.append(providers.ocr._client)
+    real: tuple[Any, ...] = (providers.llm, providers.embeddings, providers.rerank, providers.ocr)
+    clients = [p._client for p in real]
     assert not any(c.is_closed for c in clients)
     await providers.aclose()
     assert all(c.is_closed for c in clients)
@@ -43,4 +45,5 @@ async def test_one_failing_close_does_not_skip_the_rest():
     providers.llm.aclose = broken  # type: ignore[method-assign]
     with pytest.raises(ExceptionGroup):
         await providers.aclose()
-    assert providers.ocr._client.is_closed
+    ocr: Any = providers.ocr
+    assert ocr._client.is_closed

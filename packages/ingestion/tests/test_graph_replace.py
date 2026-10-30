@@ -1,6 +1,8 @@
 """replace_graph wipes and reloads the derived graph inside one write
 transaction, so a failure part-way leaves the previous graph committed."""
 
+from typing import Any, cast
+
 import pytest
 from gg_ingestion.extract.graph_load import WIPE_DERIVED_QUERY, replace_graph
 from gg_ingestion.extract.model import Edge, Node, Provenance
@@ -47,7 +49,7 @@ class _Session:
 
 class _Driver:
     def __init__(self, fail_on: str | None = None):
-        self.store = {"transactions": 0, "committed": ["previous graph"]}
+        self.store: dict[str, Any] = {"transactions": 0, "committed": ["previous graph"]}
         self._fail_on = fail_on
 
     def session(self):
@@ -70,7 +72,7 @@ _EDGES = [
 
 async def test_wipe_and_load_commit_in_one_transaction():
     driver = _Driver()
-    await replace_graph(driver, _NODES, _EDGES)
+    await replace_graph(cast(Any, driver), _NODES, _EDGES)
     committed = driver.store["committed"]
     assert driver.store["transactions"] == 1
     assert committed[0] == WIPE_DERIVED_QUERY
@@ -81,5 +83,5 @@ async def test_wipe_and_load_commit_in_one_transaction():
 async def test_failed_edge_load_leaves_previous_graph():
     driver = _Driver(fail_on="VERIFIES")
     with pytest.raises(RuntimeError):
-        await replace_graph(driver, _NODES, _EDGES)
+        await replace_graph(cast(Any, driver), _NODES, _EDGES)
     assert driver.store == {"transactions": 0, "committed": ["previous graph"]}
