@@ -55,32 +55,34 @@ so failing nights still land in the trend.
 - The battery reuses the app's own dependency assembly; a change to agent
   wiring that breaks the battery build is itself a caught regression.
 
-## Implementation note (2026-10-28)
+## Implementation note (2026-10-28, updated 2026-10-30)
 The decision text above is unchanged. The implementation differs from it in
 five places:
 
 1. Gate count. Lines 38 to 39 list five gates. `BatteryThresholds`
-   (`packages/evals/src/gg_evals/battery.py` lines 38 to 49) and
-   `gate_failures` (battery.py lines 84 to 92) apply seven metric gates: the
-   five listed plus citation precision at least 0.5 and citation recall at
-   least 0.5. battery.py lines 99 to 102 add an absolute non-leakage check,
-   and battery.py lines 163 to 165 add the coverage floors defined in
+   (`packages/evals/src/gg_evals/battery.py` lines 38 to 52) and
+   `gate_failures` (battery.py lines 87 to 99) apply eight metric gates: the
+   five listed, citation precision at least 0.5, citation recall at least
+   0.5, and count answer correctness at 1.0 when the set has checked count
+   items. battery.py lines 106 to 109 add an absolute non-leakage check, and
+   battery.py lines 170 to 172 add the coverage floors defined in
    `packages/evals/src/gg_evals/invariants.py` lines 32 to 47.
 2. Citation precision. Lines 41 to 42 state that citation precision is
-   tracked and not gated. battery.py lines 46, 47, 88 and 89 gate citation
+   tracked and not gated. battery.py lines 46, 47, 91 and 92 gate citation
    precision and citation recall at 0.5; battery.py lines 42 to 45 mark both
    floors as provisional.
 3. Noise metric. Lines 35 to 36 state that the noise eval gates on ndcg
    degradation. `NoiseReport.degradation`
    (`packages/evals/src/gg_evals/noise.py` lines 58 to 62) is the mean
    recall@10 lost to distractors over noise-tested items, and battery.py line
-   91 gates that value at 0.15 or less.
+   94 gates that value at 0.15 or less.
 4. Support scoring. Lines 22 to 24 state that each answer sentence is scored
    by its best coverage in any evidence text. `score_final_state`
-   (`packages/evals/src/gg_evals/answer_eval.py` line 131) calls
+   (`packages/evals/src/gg_evals/answer_eval.py` line 188) calls
    `cited_sentence_support` (`packages/evals/src/gg_evals/entailment.py`
-   lines 107 to 123), which scores each sentence only against the sources its
-   own [n] markers cite and uses the whole evidence window only for a
+   lines 111 to 131), which scores each sentence only against the sources its
+   own [n] markers cite, scores 0 for a sentence whose markers all fall
+   outside the evidence window, and uses the whole window only for a
    sentence with no marker.
 5. Calibration values. Lines 38 to 41 give calibration results (recall
    0.950, grounded 1.000, support 0.830, routing 1.000, degradation 0.000)
