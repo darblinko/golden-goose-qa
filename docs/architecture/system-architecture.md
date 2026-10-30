@@ -3,6 +3,23 @@
 Agentic retrieval chat platform for live regulatory audit support at a Class 3 medical device company.
 Version 0.1, 2026-07-17. Synthesized from a requirements interview and research reports 01 to 03 (`docs/research/`).
 
+**Status.** This is the target design. The repository implements part of it. Text marked
+*(planned)* describes a design element with no implementation in this repository; figures marked
+*(estimate)* have no committed measurement. The table lists the elements that differ from the
+shipped code, checked on 2026-10-30.
+
+| Design element | Shipped code | Source |
+|---|---|---|
+| Better Auth in Next.js, OIDC login | Not implemented. The API validates HS256 JWTs; the web app gets a token from `/auth/dev-token` | `apps/api/src/goldengoose_api/auth.py`, `apps/web/lib/api.ts` |
+| Docling parser with TableFormer tables | Not implemented. Native parsers per format (docx, PDF form, scanned PDF, xlsx, XML) | `packages/ingestion/src/gg_ingestion/parsers/` |
+| About 37 graph node types | 7 node labels and 20 relationship types | `packages/ingestion/src/gg_ingestion/extract/model.py` |
+| Text2Cypher fallback; `impacted_documents` and `lot_genealogy` traversals | Not implemented. Fixed parameterized Cypher queries only | `packages/retrieval/src/gg_retrieval/tools/graph_walk.py` |
+| Query decomposition with `Send` fan-out to parallel retrieval subgraphs | Not implemented. The router selects one path per turn | `packages/agents/src/gg_agents/graph.py` |
+| `interrupt()` escalation gates for review flows | Not implemented | `packages/agents/src/gg_agents/graph.py` |
+| DeepEval gates, RAGAS, ranx | Not used. Metrics and gates are implemented in `gg_evals` | `packages/evals/src/gg_evals/` |
+| OpenInference instrumentation | Not implemented. OpenTelemetry SDK with OTLP export | `packages/common/pyproject.toml` |
+| Steady-state RSS of about 5 to 6 GB | Estimate; not measured | none |
+
 ## 1. Purpose and operating context
 
 During an FDA inspection (CP 7382.850, post-QMSR) or ISO 13485 / MDSAP audit, a backroom team must
@@ -111,7 +128,7 @@ golden-goose/
 └── tests/              # cross-package integration + eval harness
 ```
 
-**Container fleet** (limits sized for a 10 GB host; steady-state RSS ~5–6 GB):
+**Container fleet** (limits sized for a 10 GB host; steady-state RSS about 5 to 6 GB *(estimate)*):
 
 | Container | Image (pinned) | Limit | Role |
 |---|---|---|---|
@@ -126,7 +143,7 @@ golden-goose/
 
 Key stack decisions (full rationale in research 03): **SeaweedFS replaces MinIO** (MinIO community
 archived 2026-04); **SAQ on Postgres replaces Celery+Redis** (drops a container, async-native,
-durable); **no IdP container** — Better Auth (Next.js) + JWT validation (FastAPI), users keyed on
+durable); **no IdP container**: Better Auth (Next.js) *(planned)* + JWT validation (FastAPI), users keyed on
 OIDC `(issuer, subject)` so Cognito/Entra/Keycloak is a config swap; **Phoenix** for local tracing
 (Langfuse v3 needs a 6-container ClickHouse stack). One app image, two entrypoints (api/worker) so
 parse spikes cannot OOM chat.
@@ -145,7 +162,7 @@ never silent overwrite, so provenance is kept and vectors are not duplicated.
 
 | Class | Parser | Notes |
 |---|---|---|
-| Born-digital PDF / Word | **Docling** | Layout-aware; TableFormer tables; lossless JSON with page+bbox provenance → feeds citations directly |
+| Born-digital PDF / Word | **Docling** *(planned; native parsers ship today)* | Layout-aware; TableFormer tables; lossless JSON with page+bbox provenance → feeds citations directly |
 | Excel matrices (FMEA, trace, control plan, logs) | **openpyxl native** | Row-as-record preserved; merged-cell forward-fill; multi-row header detection; template fingerprinting; synonym header mapping with manual override |
 | Scanned pages | **VLM OCR (Gemini-class hosted)** | Page-level text-layer probe decides; confidence recorded per page and **enforced** (gate, not warning) |
 | Regulated e-formats | Native parsers | eMDR HL7 XML, eSTAR, GUDID exports |
@@ -199,13 +216,14 @@ Prompt-injection sanitization runs at ingestion on all extracted text
 
 ## 8. Knowledge graph (Neo4j)
 
-**Schema-first, deterministic-extraction-first.** ~37 node types and typed edges from research 01
+**Schema-first, deterministic-extraction-first.** Target schema *(planned)*: ~37 node types and typed edges from research 01
 (design thread SATISFIES/VERIFIES/VALIDATES; risk thread MITIGATES/VERIFIES_CONTROL/
 EVALUATED_AGAINST; production thread BUILT_PER/CONSUMED lot genealogy; CAPA hub SOURCED_FROM/
 IMPLEMENTED_VIA/VERIFIED_BY; SUPERSEDES/CHANGED_BY revision chains), merged with an FMEA
 ontology as native labels (CONTAINS, CAN_FAIL_AS, CAUSED_BY, MITIGATED_BY, ADDRESSES DFMEA→PFMEA,
 REALIZED_IN → control plan) extended with ASSESSED_AS{stage}, TRACES_TO, VERIFIED_BY, LEADS_TO/
-CREATES (ISO 14971 bridge).
+CREATES (ISO 14971 bridge). The shipped graph has 7 node labels and 20 relationship types
+(`packages/ingestion/src/gg_ingestion/extract/model.py`).
 
 - Edges come from **ranked deterministic sources**: trace matrices > DHF/DMR/RMF indexes > form
   fields > revision-history tables > References sections > inline regex validated against master
@@ -217,7 +235,7 @@ CREATES (ISO 14971 bridge).
 - **Traversal tools**: pre-canned parameterized Cypher (revision_history, capa_thread,
   trace_requirement, impacted_documents, lot_genealogy, training_as_of, feedback_loop_evidence) —
   read-only, schema-constrained. Gated Text2Cypher (neo4j-graphrag) as fallback behind a feature
-  flag. Graph results join vector results via doc_id-filtered Qdrant fetch → unified rerank.
+  flag *(planned)*. Graph results join vector results via doc_id-filtered Qdrant fetch → unified rerank.
 - Graph store sits behind a repository interface; FalkorDB documented as RAM-relief fallback.
 
 ## 9. Structured warehouse and file tools (Postgres + DuckDB)
@@ -233,6 +251,10 @@ DuckDB powers the ad-hoc file tool: user-dropped CSV/Parquet/Excel queried in-se
 results cited by file+sheet+range.
 
 ## 10. Agent design (LangGraph 1.x StateGraph)
+
+Target flow; the decompose and fan-out stages are *(planned)*. The shipped graph routes each turn
+to one path (retrieve, external then retrieve, warehouse, compare, graph walk or out of scope)
+before grade, generate and verify (`packages/agents/src/gg_agents/graph.py`).
 
 ```
 route → decompose (Send fan-out) → parallel retrieval subgraphs → grade (CRAG, ≤2 rewrites)
@@ -252,7 +274,7 @@ route → decompose (Send fan-out) → parallel retrieval subgraphs → grade (C
 - **Generation**: citations required per claim; answers without grounded citations are blocked by
   the **entailment verifier** node and regenerated or downgraded to "insufficient evidence."
 - **State**: PostgresSaver checkpointer; immutable state transitions; `interrupt()` escalation
-  gates for quality-manager review flows. Per-node timeouts and retry policies.
+  gates for quality-manager review flows *(planned)*. Per-node timeouts and retry policies.
 - **Streaming**: `stream_mode="messages"` + custom events (citations, tool progress) over SSE.
 - QSR↔ISO synonym expansion applied at query time; every response records model, prompt hash,
   retrieved chunk IDs, and tool calls into the audit log.
@@ -261,7 +283,7 @@ route → decompose (Send fan-out) → parallel retrieval subgraphs → grade (C
 
 Chat with token streaming and agent-step visibility; citation side panel that opens the original
 PDF at page/bbox (Docling provenance) or the FMEA row/cell; register browser (NCR/CAPA/complaint
-tables); audit-log viewer; saved audit-prep collections. Better Auth (OIDC-ready), roles:
+tables); audit-log viewer; saved audit-prep collections. Better Auth (OIDC-ready) *(planned)*, roles:
 admin / qa_user / auditor_readonly. SSE with `no-transform`; App Router; TypeScript strict.
 
 ## 12. Compliance, security, audit
@@ -290,10 +312,10 @@ admin / qa_user / auditor_readonly. SSE with `no-transform`; App Router; TypeScr
   training matrix — with **seeded gaps** (broken traces, overdue reviews, AP mismatches) and a
   150–300-pair golden QA set with labeled evidence IDs.
 - **Metrics**: recall@5/10/20, MRR, nDCG@10 (ranx) measured post-fusion and post-rerank;
-  DeepEval pass/fail gates in CI (PR smoke ~30 Qs; nightly full run); RAGAS (incl. NoiseSensitivity)
-  for tuning dashboards; custom citation-entailment gate; per-node evals for router/grader/
-  Text2Cypher.
-- **Observability**: OTel + OpenInference everywhere; Phoenix locally; LangSmith/Langfuse
+  DeepEval pass/fail gates in CI (PR smoke ~30 Qs; nightly full run) and RAGAS (incl. NoiseSensitivity)
+  for tuning dashboards *(planned; the shipped gates and noise check are in `gg_evals`)*; custom citation-entailment gate; per-node evals for router/grader/
+  Text2Cypher *(planned)*.
+- **Observability**: OTel + OpenInference *(OpenInference planned)* everywhere; Phoenix locally; LangSmith/Langfuse
   reachable in cloud via the same instrumentation. Stage-by-stage retrieval health endpoint
   (`/health/retrieval`).
 
