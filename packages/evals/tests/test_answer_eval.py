@@ -132,3 +132,33 @@ async def test_empty_report_is_all_zero():
     report = await evaluate_answers(StubGraph({}), [])
     assert report.grounded_rate == 0.0
     assert report.support == 0.0
+
+
+def test_support_ignores_revisionless_controlled_document():
+    # The generator drops a controlled document without a revision before it
+    # numbers the sources, so [1] in the answer points at the revised SOP. The
+    # eval must score against that same window, not the raw parent list.
+    unrevised = {
+        "provenance": "internal",
+        "doc_type": "sop",
+        "revision": None,
+        "text": EVIDENCE_TEXT,
+        "citation": "SOP-004",
+    }
+    revised = {
+        "provenance": "internal",
+        "doc_type": "sop",
+        "revision": "B",
+        "text": "Training records are retained for ten years.",
+        "citation": "SOP-006 Rev B",
+    }
+    state = dict(GROUNDED_STATE) | {"parents": [unrevised, revised]}
+    assert score_final_state(ITEM, state).support == 0.0
+
+
+def test_support_uses_the_rendered_excerpt():
+    # A long parent is clipped to the context budget before the generator sees
+    # it; a sentence supported only by the clipped tail was not in the evidence.
+    long_text = "Unrelated preamble about document control. " * 200 + EVIDENCE_TEXT
+    state = dict(GROUNDED_STATE) | {"parents": [{"text": long_text}]}
+    assert score_final_state(ITEM, state).support == 0.0

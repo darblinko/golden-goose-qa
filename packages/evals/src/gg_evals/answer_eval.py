@@ -10,10 +10,11 @@ citations to score and is already penalized once through grounded_rate.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
-from gg_agents.nodes import GENERATION_PARENTS
-from gg_agents.state import initial_state
+from gg_agents.nodes import generation_parents
+from gg_agents.prompts import source_excerpt
+from gg_agents.state import AgentState, initial_state
 
 from gg_evals.entailment import cited_sentence_support
 from gg_evals.retrieval_eval import EvalItem, retrievable_evidence, select_items
@@ -77,11 +78,17 @@ def _grounded_mean(results: tuple[AnswerResult, ...], value: Any) -> float:
 
 
 def _evidence_texts(state: dict[str, Any]) -> list[str]:
-    """Mirror of the generator's evidence window (nodes._generation_parents):
-    support must be judged against what the model was actually shown."""
-    parents = state.get("parents") or []
-    external = state.get("external_parents") or []
-    return [p["text"] for p in parents[:GENERATION_PARENTS] + external]
+    """The generator's evidence window, numbered and rendered exactly as the
+    prompt shows it (nodes.generation_parents, prompts.source_excerpt): support
+    must be judged against what the model was actually shown."""
+    window = cast(
+        AgentState,
+        {
+            "parents": state.get("parents") or [],
+            "external_parents": state.get("external_parents") or [],
+        },
+    )
+    return [source_excerpt(parent) for parent in generation_parents(window)]
 
 
 def _citation_scores(

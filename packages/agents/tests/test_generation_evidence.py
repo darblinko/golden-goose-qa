@@ -8,7 +8,7 @@ tool/external parents are exempt — they legitimately have no revision.
 
 from typing import Any, cast
 
-from gg_agents.nodes import _generation_parents, _has_required_revision
+from gg_agents.nodes import _has_required_revision, generation_parents
 from gg_agents.state import AgentState, citation_view, parent_to_dict
 from gg_retrieval.models import ParentContext
 
@@ -47,21 +47,21 @@ def test_external_provenance_never_gated():
     )
 
 
-def test_generation_parents_drops_unrevised_controlled_doc():
+def testgeneration_parents_drops_unrevised_controlled_doc():
     state = cast(
         AgentState,
         {"parents": [_internal("sop", None), _internal("sop", "B")], "external_parents": []},
     )
-    parents = _generation_parents(state)
+    parents = generation_parents(state)
     assert len(parents) == 1
     assert parents[0]["revision"] == "B"
 
 
-def test_generation_parents_appends_external_after_filter():
+def testgeneration_parents_appends_external_after_filter():
     external = {"provenance": "external", "doc_type": "external_result", "revision": ""}
     state = cast(AgentState, {"parents": [_internal("sop", None)], "external_parents": [external]})
     # the only internal parent is dropped; external evidence still appears
-    assert _generation_parents(state) == [external]
+    assert generation_parents(state) == [external]
 
 
 def _parent_context() -> ParentContext:

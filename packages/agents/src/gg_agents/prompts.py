@@ -65,7 +65,7 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _source_body(parent: dict[str, Any]) -> str:
+def source_excerpt(parent: dict[str, Any]) -> str:
     """The excerpt shown for one source: the parent section clipped to the
     context budget, but with the child passage that actually matched guaranteed
     to appear verbatim. A long parent clips to its head, which can drop the
@@ -85,7 +85,7 @@ def _source_body(parent: dict[str, Any]) -> str:
 
 def format_sources(parents: list[dict[str, Any]]) -> str:
     blocks = [
-        f"[{i}] {parent['citation']}\n{_source_body(parent)}"
+        f"[{i}] {parent['citation']}\n{source_excerpt(parent)}"
         for i, parent in enumerate(parents, start=1)
     ]
     return "\n\n".join(blocks)
@@ -96,7 +96,7 @@ def format_marked_sources(marked_parents: list[tuple[int, dict[str, Any]]]) -> s
     Renumbering a cited subset 1..k would make the verifier read [3] in the
     answer as citing a different source than the generator meant."""
     blocks = [
-        f"[{marker}] {parent['citation']}\n{_source_body(parent)}"
+        f"[{marker}] {parent['citation']}\n{source_excerpt(parent)}"
         for marker, parent in marked_parents
     ]
     return "\n\n".join(blocks)

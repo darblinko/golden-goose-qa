@@ -176,7 +176,7 @@ def _has_required_revision(parent: dict[str, Any]) -> bool:
     return bool((parent.get("revision") or "").strip())
 
 
-def _generation_parents(state: AgentState) -> list[dict[str, Any]]:
+def generation_parents(state: AgentState) -> list[dict[str, Any]]:
     """Evidence handed to generate/verify: internal parents first, external
     evidence appended last so markers for QMS documents stay stable. Controlled
     documents missing a revision are dropped before the window is sliced — an
@@ -364,7 +364,7 @@ class AgentNodes:
 
     @traced("agent.generate")
     async def generate(self, state: AgentState) -> AgentState:
-        parents = _generation_parents(state)
+        parents = generation_parents(state)
         messages = prompts.generator_messages(state["question"], parents, state.get("history", []))
         if state.get("regenerated"):
             messages = [
@@ -408,7 +408,7 @@ class AgentNodes:
     @traced("agent.verify")
     async def verify(self, state: AgentState) -> AgentState:
         answer = state["answer"]
-        parents = _generation_parents(state)
+        parents = generation_parents(state)
         if answer.strip() == "INSUFFICIENT_EVIDENCE":
             return {
                 "verdict": "insufficient_evidence",
@@ -469,7 +469,7 @@ class AgentNodes:
                 "reason": reason,
             }
         )
-        citations = [citation_view(p, i) for i, p in enumerate(_generation_parents(state), start=1)]
+        citations = [citation_view(p, i) for i, p in enumerate(generation_parents(state), start=1)]
         return {
             "verdict": "insufficient_evidence",
             "answer": UNSUPPORTED_ANSWER,
