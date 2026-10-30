@@ -31,7 +31,12 @@ from gg_common.settings import AppSettings, get_settings
 from gg_common.tracing import configure_tracing, reset_tracing
 
 from gg_ingestion import registry
-from gg_ingestion.connectors import FilesystemConnector, SyncReport, sync_connector
+from gg_ingestion.connectors import (
+    FilesystemConnector,
+    SyncReport,
+    acknowledge_sync,
+    sync_connector,
+)
 from gg_ingestion.extract.derive import DeriveReport, derive_corpus
 from gg_ingestion.extract.graph_migrate import apply_migrations
 from gg_ingestion.indexer import make_client
@@ -159,27 +164,47 @@ async def _sync(
 ) -> int:
     connector = FilesystemConnector(source_root)
     while True:
-        report = await sync_connector(connector, staging)
+        # With --ingest the manifest only advances for changes that ingestion,
+        # retirement and derivation completed; anything else is offered again
+        # by the next sync instead of being treated as already processed.
+        report = await sync_connector(connector, staging, acknowledge=not ingest)
         _print_sync_report(connector.name, report)
+        ok = True
         if ingest and (report.fetched or report.deleted):
-            corpus_report: CorpusReport | None = None
-            if report.fetched:
-                corpus_report, gate_error = await _ingest_corpus(staging, local_store)
-                if (corpus_report.failed or gate_error is not None) and watch is None:
-                    return 1
-            if report.deleted:
-                # A source that disappeared from the listing is retired from the
-                # index and tombstoned — unless the same cycle re-ingested its
-                # doc_key under a new path, which is a rename: rebind, do not
-                # retire (retiring would destroy a just-re-confirmed document).
-                _print_retired(await _reconcile_deletions(report.deleted, corpus_report))
-            # Adds, updates, and retirements only reach retrieval once the graph
-            # and register warehouse are rebuilt; do it now instead of leaving
-            # them stale until a manual derive.
-            await _derive(local_store, skip_graph=False)
+            ok = await _process_sync_changes(report, staging, local_store)
         if watch is None:
-            return 0
+            return 0 if ok else 1
         await asyncio.sleep(watch)
+
+
+async def _process_sync_changes(report: SyncReport, staging: Path, local_store: str | None) -> bool:
+    """Ingest, retire and derive one sync cycle's changes, then acknowledge the
+    ones that completed. Returns False when any fetched document failed."""
+    corpus_report: CorpusReport | None = None
+    gate_error: StageFailureRateError | None = None
+    if report.fetched:
+        corpus_report, gate_error = await _ingest_corpus(staging, local_store)
+    if report.deleted:
+        # A source that disappeared from the listing is retired from the
+        # index and tombstoned, unless the same cycle re-ingested its doc_key
+        # under a new path, which is a rename: rebind, do not retire
+        # (retiring would destroy a just-re-confirmed document).
+        _print_retired(await _reconcile_deletions(report.deleted, corpus_report))
+    # Adds, updates, and retirements only reach retrieval once the graph and
+    # register warehouse are rebuilt; do it now instead of leaving them stale
+    # until a manual derive.
+    await _derive(local_store, skip_graph=False)
+    completed = _completed_fetches(report.fetched, corpus_report)
+    acknowledge_sync(report, fetched=completed, deleted=report.deleted)
+    return gate_error is None and len(completed) == len(report.fetched)
+
+
+def _completed_fetches(fetched: tuple[str, ...], report: CorpusReport | None) -> list[str]:
+    """Fetched source ids whose ingestion reached a terminal non-failure state."""
+    if report is None:
+        return []
+    done = {r.path for r in report.results if r.state != "failed"}
+    return [source_id for source_id in fetched if source_id in done]
 
 
 def _reingested_paths(report: CorpusReport | None) -> dict[str, str]:

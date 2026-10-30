@@ -3,7 +3,7 @@
 from gg_ingestion.connectors.base import ConnectorError, SourceConnector, SourceDocument
 from gg_ingestion.connectors.filesystem import FilesystemConnector
 from gg_ingestion.connectors.sharepoint import SharePointStubConnector
-from gg_ingestion.connectors.sync import SyncReport, sync_connector
+from gg_ingestion.connectors.sync import SyncReport, acknowledge_sync, sync_connector
 
 __all__ = [
     "ConnectorError",
@@ -12,5 +12,6 @@ __all__ = [
     "SourceConnector",
     "SourceDocument",
     "SyncReport",
+    "acknowledge_sync",
     "sync_connector",
 ]

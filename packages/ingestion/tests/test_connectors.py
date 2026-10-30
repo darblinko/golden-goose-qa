@@ -17,7 +17,7 @@ from gg_ingestion.connectors import (
     SourceConnector,
     sync_connector,
 )
-from gg_ingestion.connectors.sync import default_manifest_path
+from gg_ingestion.connectors.sync import acknowledge_sync, default_manifest_path
 
 _T1 = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
 _T2 = datetime(2026, 3, 2, 9, 30, tzinfo=UTC)
@@ -115,6 +115,40 @@ async def test_sync_detects_modification_and_deletion(make_connector, tmp_path):
     assert report.unchanged == ("01_quality_manual/QM-100_Quality_Manual_revC.docx",)
     assert (staging / "05_capa/CAPA-2025-0001.docx").read_bytes() == b"capa record rev B"
     assert not (staging / "logs/readings.csv").exists()
+
+
+async def test_unacknowledged_fetch_is_refetched_until_acknowledged(make_connector, tmp_path):
+    staging = tmp_path / "staging"
+    connector = make_connector(_SPEC)
+    first = await sync_connector(connector, staging, acknowledge=False)
+    assert sorted(first.fetched) == sorted(_SPEC)
+    # Downstream ingestion failed for every document: nothing is acknowledged,
+    # so the next sync must offer the same work again.
+    retry = await sync_connector(connector, staging, acknowledge=False)
+    assert sorted(retry.fetched) == sorted(_SPEC)
+    succeeded = ["05_capa/CAPA-2025-0001.docx"]
+    acknowledge_sync(retry, fetched=succeeded, deleted=())
+    third = await sync_connector(connector, staging, acknowledge=False)
+    assert third.unchanged == ("05_capa/CAPA-2025-0001.docx",)
+    assert sorted(third.fetched) == sorted(set(_SPEC) - set(succeeded))
+
+
+async def test_unacknowledged_deletion_is_reported_again(make_connector, tmp_path):
+    staging = tmp_path / "staging"
+    await sync_connector(make_connector(_SPEC), staging)
+    changed = dict(_SPEC)
+    changed["05_capa/CAPA-2025-0002.docx"] = (b"new capa", _T2)
+    del changed["logs/readings.csv"]
+    connector = make_connector(changed)
+    report = await sync_connector(connector, staging, acknowledge=False)
+    assert report.deleted == ("logs/readings.csv",)
+    again = await sync_connector(connector, staging, acknowledge=False)
+    assert again.deleted == ("logs/readings.csv",)
+    assert again.fetched == ("05_capa/CAPA-2025-0002.docx",)
+    acknowledge_sync(again, fetched=(), deleted=again.deleted)
+    after = await sync_connector(connector, staging, acknowledge=False)
+    assert after.deleted == ()
+    assert after.fetched == ("05_capa/CAPA-2025-0002.docx",)
 
 
 async def test_manifest_stays_outside_the_staging_corpus(make_connector, tmp_path):
