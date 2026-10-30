@@ -52,6 +52,16 @@ class TestAccepted:
         sql = 'SELECT "Set Point" FROM data'
         assert validate_select(sql, allowed_relations=frozenset({"data"})) == sql
 
+    def test_allowlisted_functions_pass(self):
+        sql = (
+            "SELECT status, count(*) AS n, min(opened), max(age_days), "
+            "coalesce(sum(CASE WHEN is_open THEN 1 ELSE 0 END), 0), "
+            "date_trunc('month', opened), extract(year FROM opened), lower(status) "
+            "FROM registers.v_capa_register WHERE opened >= '2025-01-01' AND NOT is_open "
+            "GROUP BY status, opened"
+        )
+        assert validate_select(sql, allowed_relations=ALLOWED) == sql
+
 
 class TestRejected:
     @pytest.mark.parametrize(
@@ -80,6 +90,24 @@ class TestRejected:
     )
     def test_rejects(self, sql, reason):
         with pytest.raises(SqlGuardError, match=reason):
+            validate_select(sql, allowed_relations=ALLOWED)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            'SELECT "pg_sleep"(1) FROM registers.v_ncr_register',
+            'SELECT "pg_catalog"."pg_sleep"(1) FROM registers.v_ncr_register',
+            "SELECT pg_catalog.set_config('gg.read_restricted', 'on', true)",
+            "SELECT \"set_config\"('gg.read_restricted', 'on', true)",
+            "SELECT \"SET_CONFIG\"('gg.read_restricted', 'on', true)",
+            "SELECT \"query_to_xml\"('SELECT * FROM registers.complaint', true, true, '')",
+            "SELECT current_setting('gg.read_restricted') FROM registers.v_ncr_register",
+            "SELECT generate_series(1, 1000000000) FROM registers.v_ncr_register",
+            "SELECT ncr_id FROM registers.v_ncr_register WHERE \"lo_import\"('/etc/passwd') > 0",
+        ],
+    )
+    def test_rejects_functions_outside_allowlist(self, sql):
+        with pytest.raises(SqlGuardError, match="function not allowed"):
             validate_select(sql, allowed_relations=ALLOWED)
 
     def test_rejects_comma_join_smuggling(self):

@@ -88,6 +88,62 @@ _DANGEROUS_FUNCTION_RE = re.compile(
 )
 
 
+# Structural allowlist of function nodes, by sqlglot expression class. The
+# regex above only sees unquoted names; a quoted or schema-qualified call such
+# as "pg_sleep"(1) or pg_catalog."set_config"(...) reaches the AST as an
+# Anonymous node, which is refused unless its name is listed below. Boolean
+# connectives and CASE are Func subclasses in sqlglot, hence their presence.
+_ALLOWED_FUNCTION_CLASSES = frozenset(
+    {
+        "And",
+        "Or",
+        "Xor",
+        "Case",
+        "If",
+        "Coalesce",
+        "Nullif",
+        "Greatest",
+        "Least",
+        "Count",
+        "Sum",
+        "Avg",
+        "Min",
+        "Max",
+        "ArrayAgg",
+        "GroupConcat",
+        "Stddev",
+        "StddevPop",
+        "StddevSamp",
+        "Variance",
+        "VariancePop",
+        "Lower",
+        "Upper",
+        "Length",
+        "Trim",
+        "Concat",
+        "ConcatWs",
+        "Substring",
+        "Round",
+        "Abs",
+        "Floor",
+        "Ceil",
+        "Extract",
+        "DateTrunc",
+        "TimestampTrunc",
+        "CurrentDate",
+        "CurrentTimestamp",
+        "TimeToStr",
+        "Cast",
+        "TryCast",
+        "RowNumber",
+        "Rank",
+        "DenseRank",
+    }
+)
+# Postgres functions sqlglot does not model, matched case-insensitively.
+_ALLOWED_ANONYMOUS_FUNCTIONS = frozenset({"age", "date_part"})
+
+
 def validate_select(sql: str, *, allowed_relations: frozenset[str]) -> str:
     """Return the validated statement (trailing semicolon stripped) or raise."""
     statement = sql.strip().rstrip(";").strip()
@@ -127,6 +183,7 @@ def validate_select(sql: str, *, allowed_relations: frozenset[str]) -> str:
 
     _reject_comma_joins(scan)
     _reject_disallowed_relations(tree, allowed_relations)
+    _reject_disallowed_functions(tree)
 
     return statement
 
@@ -143,6 +200,19 @@ def _parse_single_select(statement: str) -> exp.Expression:
     if not isinstance(tree, _SELECT_ROOTS):
         raise SqlGuardError("only SELECT statements are allowed")
     return tree
+
+
+def _reject_disallowed_functions(tree: exp.Expression) -> None:
+    """Every function call must be on the allowlist, however it is quoted or
+    qualified. Judged on the AST so identifier quoting cannot hide a call."""
+    for node in tree.find_all(exp.Func):
+        if isinstance(node, exp.Anonymous):
+            name = node.name
+            if name.lower() in _ALLOWED_ANONYMOUS_FUNCTIONS:
+                continue
+            raise SqlGuardError(f"function not allowed: {name}")
+        if type(node).__name__ not in _ALLOWED_FUNCTION_CLASSES:
+            raise SqlGuardError(f"function not allowed: {node.sql_name().lower()}")
 
 
 def _reject_disallowed_relations(tree: exp.Expression, allowed_relations: frozenset[str]) -> None:
