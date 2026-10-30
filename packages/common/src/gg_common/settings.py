@@ -8,9 +8,11 @@ log_effective_settings() at every process start.
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import quote
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 # Loaded by every settings model (not just AppSettings) so a single `.env`
 # configures nested sections too: without this, GG_PG_* / GG_NEO4J_* / GG_S3_*
@@ -39,26 +41,35 @@ class PostgresSettings(BaseSettings):
     admin_user: str = "gg_admin"
     admin_password: SecretStr = SecretStr(_DEV_PG_ADMIN_PASSWORD)
 
+    def _url(self, drivername: str, user: str, password: SecretStr) -> str:
+        # URL.create quotes every component, so a password such as alpha@beta
+        # is not split into a password and a host.
+        return URL.create(
+            drivername,
+            username=user,
+            password=password.get_secret_value(),
+            host=self.host,
+            port=self.port,
+            database=self.database,
+        ).render_as_string(hide_password=False)
+
     @property
     def dsn(self) -> str:
+        # libpq URI: every component fully percent-encoded (libpq rejects a raw
+        # space, which SQLAlchemy's URL rendering leaves in place).
+        password = self.password.get_secret_value()
         return (
-            f"postgresql://{self.user}:{self.password.get_secret_value()}"
-            f"@{self.host}:{self.port}/{self.database}"
+            f"postgresql://{quote(self.user, safe='')}:{quote(password, safe='')}"
+            f"@{self.host}:{self.port}/{quote(self.database, safe='')}"
         )
 
     @property
     def sqlalchemy_url(self) -> str:
-        return (
-            f"postgresql+psycopg://{self.user}:{self.password.get_secret_value()}"
-            f"@{self.host}:{self.port}/{self.database}"
-        )
+        return self._url("postgresql+psycopg", self.user, self.password)
 
     @property
     def admin_sqlalchemy_url(self) -> str:
-        return (
-            f"postgresql+psycopg://{self.admin_user}:{self.admin_password.get_secret_value()}"
-            f"@{self.host}:{self.port}/{self.database}"
-        )
+        return self._url("postgresql+psycopg", self.admin_user, self.admin_password)
 
 
 class QdrantSettings(BaseSettings):

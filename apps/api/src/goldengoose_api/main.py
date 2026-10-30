@@ -22,6 +22,7 @@ from gg_retrieval.tools.external.toolkit import build_external_toolkit
 from gg_retrieval.tools.graph_walk import GraphWalker
 from gg_retrieval.tools.warehouse import WarehouseTool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg.conninfo import make_conninfo
 from qdrant_client import AsyncQdrantClient
 
 from goldengoose_api.ratelimit import RateLimiter, rate_limit_middleware
@@ -40,10 +41,14 @@ _DEV_CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 def _checkpointer_conninfo(settings: AppSettings) -> str:
     pg = settings.postgres
-    return (
-        f"host={pg.host} port={pg.port} dbname={pg.database} "
-        f"user={pg.user} password={pg.password.get_secret_value()} "
-        f"options='-c search_path=checkpoints'"
+    # make_conninfo quotes and escapes each value for libpq.
+    return make_conninfo(
+        host=pg.host,
+        port=pg.port,
+        dbname=pg.database,
+        user=pg.user,
+        password=pg.password.get_secret_value(),
+        options="-c search_path=checkpoints",
     )
 
 
