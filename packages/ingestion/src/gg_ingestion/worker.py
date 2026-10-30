@@ -27,6 +27,7 @@ def _queue_url() -> str:
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     providers = build_providers(settings.providers)
+    ctx["providers"] = providers
     store = S3ObjectStore(settings.objectstore)
     store.ensure_bucket(settings.objectstore.bucket_documents)
     store.ensure_bucket(settings.objectstore.bucket_artifacts)
@@ -46,6 +47,7 @@ async def startup(ctx: dict[str, Any]) -> None:
 async def shutdown(ctx: dict[str, Any]) -> None:
     await ctx["qdrant"].close()
     await ctx["engine"].dispose()
+    await ctx["providers"].aclose()
 
 
 async def ingest_corpus(ctx: dict[str, Any], *, corpus_dir: str) -> dict[str, int]:

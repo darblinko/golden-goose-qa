@@ -85,6 +85,7 @@ async def _ingest_corpus(
         finally:
             await qdrant.close()
             await engine.dispose()
+            await providers.aclose()
     _print_report(report, using_fakes=providers.using_fakes, usage=costs.summary())
     if gate_error is not None:
         print(f"GATE {gate_error}", file=sys.stderr)

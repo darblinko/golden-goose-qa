@@ -166,6 +166,7 @@ async def run_battery(
         await graph_driver.close()
         await qdrant.close()
         await engine.dispose()
+        await providers.aclose()
 
     failures = gate_failures(retrieval, answers, routing, noise, thresholds) + coverage_failures(
         evaluated, retrieval, noise, invariants, correctness_scored=len(answers.checked())

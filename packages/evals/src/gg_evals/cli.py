@@ -71,6 +71,7 @@ async def _run(qa_path: Path, *, smoke_only: bool, gate: float, out: Path | None
     finally:
         await qdrant.close()
         await engine.dispose()
+        await providers.aclose()
 
     _print_report(report, using_fakes=providers.using_fakes)
     if out is not None:
