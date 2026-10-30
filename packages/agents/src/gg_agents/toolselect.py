@@ -68,7 +68,22 @@ _AGGREGATE_RE = re.compile(
     re.IGNORECASE,
 )
 _UNVERIFIED_RE = re.compile(
-    r"\brequirements?\b.*\bverif|\bverif\w*\b.*\brequirements?\b", re.IGNORECASE | re.DOTALL
+    r"\brequirements?\b.*\b(?:un)?verif|\b(?:un)?verif\w*\b.*\brequirements?\b",
+    re.IGNORECASE | re.DOTALL,
+)
+# Verification intent of a requirements question. Only gap questions ("which
+# lack", "unverified") and yes/no status questions ("do all ... have", "has it
+# been verified") are answered by the unverified-requirements traversal; a
+# question asking for the verified set has no query and is refused.
+_VERIFICATION_GAP_RE = re.compile(
+    r"\bunverified\b|\black(?:s|ing)?\b|\bmissing\b|\bwithout\b|\bif not\b"
+    r"|\bnot (?:yet |been )*verified\b|\bno verification\b|\bgaps?\b",
+    re.IGNORECASE,
+)
+_VERIFICATION_STATUS_RE = re.compile(
+    r"^\s*(?:do|does|did|are|is|was|were|have|has)\b"
+    r"|\b(?:has|have) (?:it|they|this|that) been verified\b",
+    re.IGNORECASE,
 )
 _COUNT_PHRASE_RE = re.compile(r"\bhow many\b|\bcount\b|\btotal number\b", re.IGNORECASE)
 _EXTERNAL_SOURCE_RE = re.compile(
@@ -282,6 +297,17 @@ def _date_window(question: str) -> tuple[date, date, str] | None:
     return date(year, 1, 1), date(year + 1, 1, 1), str(year)
 
 
+def requirement_verification_intent(question: str) -> str | None:
+    """ "unverified" for a gap or status question about requirement
+    verification, "verified" for one asking for the verified set, None when
+    the question is not about requirement verification."""
+    if not _UNVERIFIED_RE.search(question):
+        return None
+    if _VERIFICATION_GAP_RE.search(question) or _VERIFICATION_STATUS_RE.search(question):
+        return "unverified"
+    return "verified"
+
+
 def route_override(question: str) -> str | None:
     """Return a pattern name when the question is unambiguous, else None.
 
@@ -440,8 +466,11 @@ def warehouse_plan(question: str) -> WarehousePlan:
         doc_key = _first_identifier(question, "document")
         if doc_key:
             return WarehousePlan(saved="training_for_document", params={"doc_key": doc_key})
-    if "requirement" in lowered and "verif" in lowered:
+    intent = requirement_verification_intent(question)
+    if intent == "unverified":
         return WarehousePlan(saved="unverified_requirements")
+    if intent == "verified":
+        return _COUNT_REFUSAL
     if "mdr" in lowered or "medical device report" in lowered:
         return WarehousePlan(saved="mdr_register")
     return WarehousePlan(saved="register_counts")
@@ -703,8 +732,11 @@ def graph_plan(question: str) -> GraphPlan:
         # thread walk; the parser captures the whole id, not the 3-digit tail
         # a document-key form would stop at.
         return GraphPlan(method="record_thread", argument=record_id)
-    if _UNVERIFIED_RE.search(question):
+    intent = requirement_verification_intent(question)
+    if intent == "unverified":
         return GraphPlan(method="unverified_requirements")
+    if intent == "verified":
+        return GraphPlan(method="unsupported")
     if doc_key:
         return GraphPlan(method="document_profile", argument=doc_key)
     return GraphPlan(method="unverified_requirements")

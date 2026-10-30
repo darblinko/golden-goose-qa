@@ -607,6 +607,12 @@ class AgentNodes:
                 result = await self.deps.graph.record_thread(plan.argument or "")
             elif plan.method == "document_profile":
                 result = await self.deps.graph.document_profile(plan.argument or "")
+            elif plan.method == "unsupported":
+                return self._tool_failure(
+                    "graph_walk",
+                    "no traversal lists verified requirements; ask which requirements "
+                    "lack verification evidence instead",
+                )
             else:
                 result = await self.deps.graph.unverified_requirements()
         except Exception as exc:

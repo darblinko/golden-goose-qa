@@ -504,6 +504,18 @@ async def test_historical_graph_question_is_refused():
     assert "as-of" in final["answer"]
 
 
+async def test_verified_requirement_listing_is_refused_not_inverted():
+    # No query lists verified requirements; answering with the unverified set
+    # would return the opposite of what was asked.
+    retriever = StubRetriever([], [])
+    walker = StubGraphWalker(TRACE_RESULT)
+    deps = make_deps({}, retriever, llm_is_fake=True, graph=walker)
+    graph = build_agent_graph(deps)
+    final = await graph.ainvoke(initial_state("List all verified requirements."))
+    assert walker.calls == []
+    assert final["verdict"] == "insufficient_evidence"
+
+
 async def test_missing_graph_anchor_answers_not_in_corpus_not_grounded():
     # A training question for a document absent from the graph (the WI-MFG-014
     # acceptance case) must resolve to insufficient_evidence, never a grounded

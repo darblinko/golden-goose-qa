@@ -454,6 +454,29 @@ class TestGraphPlan:
         assert plan.method == "unverified_requirements"
         assert plan.argument is None
 
+    def test_requirement_verification_intents(self):
+        # Opposing phrasings must not share a plan: only gap and status
+        # questions are answered by the unverified-requirements traversal.
+        unverified = (
+            "Which requirements lack verification evidence?",
+            "List all unverified requirements.",
+            "Are there requirements without verification?",
+            "Do all design input requirements have verification evidence? If not, which lack it?",
+            "Which design input requirement covers EO residuals, and has it been verified?",
+        )
+        verified = (
+            "List all verified requirements.",
+            "Which requirements have been verified?",
+            "Which requirements have verification evidence?",
+        )
+        for question in unverified:
+            assert graph_plan(question).method == "unverified_requirements", question
+            assert warehouse_plan(question).saved == "unverified_requirements", question
+        for question in verified:
+            assert graph_plan(question).method == "unsupported", question
+            plan = warehouse_plan(question)
+            assert (plan.saved, plan.sql) == (None, None), question
+
     def test_doc_key_falls_back_to_document_profile(self):
         plan = graph_plan("Walk me through everything connected to DFMEA-100.")
         assert plan.method == "document_profile"
