@@ -614,7 +614,9 @@ class IngestionPipeline:
         await indexer.apply_supersessions(self.qdrant, self.settings.qdrant, lifecycles)
 
     def _processing_config_hash(self) -> str:
-        return processing_config_hash(self.settings)
+        return processing_config_hash(
+            self.settings, embedding_implementation=type(self.embeddings).__name__
+        )
 
     async def _processing_config_matches(self, session: AsyncSession, version_id: str) -> bool:
         """True when the version was indexed under the current processing config.

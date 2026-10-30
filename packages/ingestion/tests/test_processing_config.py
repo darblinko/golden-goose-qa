@@ -13,6 +13,10 @@ from gg_common.settings import ProviderSettings, RetrievalSettings
 from gg_ingestion.processing_config import processing_config_hash
 
 
+def _hash(settings, implementation="VoyageEmbeddingProvider"):
+    return processing_config_hash(settings, embedding_implementation=implementation)
+
+
 def _settings(**overrides):
     retrieval = RetrievalSettings(
         child_chunk_tokens=overrides.get("child_chunk_tokens", 350),
@@ -28,31 +32,28 @@ def _settings(**overrides):
 
 
 def test_hash_is_stable_hex():
-    h = processing_config_hash(_settings())
-    assert h == processing_config_hash(_settings())
+    h = _hash(_settings())
+    assert h == _hash(_settings())
     assert len(h) == 64
     int(h, 16)  # hex
 
 
 def test_chunk_size_change_changes_hash():
-    assert processing_config_hash(_settings()) != processing_config_hash(
-        _settings(child_chunk_tokens=400)
-    )
+    assert _hash(_settings()) != _hash(_settings(child_chunk_tokens=400))
 
 
 def test_embedding_model_change_changes_hash():
-    assert processing_config_hash(_settings()) != processing_config_hash(
-        _settings(embedding_model="voyage-3")
-    )
+    assert _hash(_settings()) != _hash(_settings(embedding_model="voyage-3"))
 
 
 def test_embedding_dimensions_change_changes_hash():
-    assert processing_config_hash(_settings()) != processing_config_hash(
-        _settings(embedding_dimensions=512)
-    )
+    assert _hash(_settings()) != _hash(_settings(embedding_dimensions=512))
 
 
 def test_max_embed_chars_change_changes_hash():
-    assert processing_config_hash(_settings()) != processing_config_hash(
-        _settings(max_embed_chars=4000)
-    )
+    assert _hash(_settings()) != _hash(_settings(max_embed_chars=4000))
+
+
+def test_embedding_implementation_change_changes_hash():
+    # A keyless run falls back to fake embeddings under the same settings.
+    assert _hash(_settings()) != _hash(_settings(), implementation="FakeEmbeddingProvider")

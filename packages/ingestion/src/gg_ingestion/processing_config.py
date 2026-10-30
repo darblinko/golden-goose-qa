@@ -13,10 +13,13 @@ import json
 from typing import Any
 
 
-def processing_config_hash(settings: Any) -> str:
+def processing_config_hash(settings: Any, *, embedding_implementation: str) -> str:
     """SHA-256 over the canonical processing config. `settings` need only expose
-    `.retrieval` and `.providers` with the fields read below (the app settings do)."""
+    `.retrieval` and `.providers` with the fields read below (the app settings do).
+    `embedding_implementation` names the provider class actually built: without a
+    key the factory falls back to fake embeddings under the same settings."""
     config = {
+        "embedding_implementation": embedding_implementation,
         "child_chunk_tokens": settings.retrieval.child_chunk_tokens,
         "parent_chunk_tokens": settings.retrieval.parent_chunk_tokens,
         "max_embed_chars": settings.retrieval.max_embed_chars,

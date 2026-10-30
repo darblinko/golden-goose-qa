@@ -8,6 +8,8 @@ re-indexed instead of being reported unchanged forever."""
 from types import SimpleNamespace
 from typing import Any, cast
 
+from gg_common.providers.fakes import FakeEmbeddingProvider
+from gg_common.providers.real import VoyageEmbeddingProvider
 from gg_common.settings import ProviderSettings, RetrievalSettings
 from gg_ingestion import registry
 from gg_ingestion.models import DocMeta
@@ -21,7 +23,9 @@ _SETTINGS = SimpleNamespace(
     retrieval=RetrievalSettings(),
     providers=ProviderSettings(),
 )
-_CURRENT_CONFIG_HASH = processing_config_hash(_SETTINGS)
+_CURRENT_CONFIG_HASH = processing_config_hash(
+    _SETTINGS, embedding_implementation="FakeEmbeddingProvider"
+)
 
 
 class _FakeResult:
@@ -63,14 +67,14 @@ class _FakeQdrant:
         return SimpleNamespace(count=self._live_count)
 
 
-def _pipeline(live_count: int) -> IngestionPipeline:
+def _pipeline(live_count: int, embeddings: Any = None) -> IngestionPipeline:
     store = SimpleNamespace(exists=lambda bucket, key: True, put=lambda *a: None)
     return IngestionPipeline(
         settings=cast(Any, _SETTINGS),
         session_factory=cast(Any, None),
         qdrant=cast(Any, _FakeQdrant(live_count)),
         object_store=cast(Any, store),
-        embeddings=cast(Any, SimpleNamespace(dimensions=8)),
+        embeddings=embeddings or FakeEmbeddingProvider(dimensions=8),
         ocr=cast(Any, None),
     )
 
@@ -137,3 +141,14 @@ async def test_falls_through_when_config_hash_missing():
     pipeline = _pipeline(live_count=3)
     session = _FakeSession(child_count=3, stored_config_hash=None)
     assert await _short_circuit(pipeline, session) is None
+
+
+async def test_falls_through_when_a_real_embedding_key_replaces_the_fake():
+    # The settings are unchanged, but a version indexed with the keyless fake
+    # embeddings carries hash vectors that real query embeddings cannot match.
+    real = VoyageEmbeddingProvider(api_key="test-only", model="voyage-4-large", dimensions=8)
+    try:
+        pipeline = _pipeline(live_count=3, embeddings=real)
+        assert await _short_circuit(pipeline, _FakeSession(child_count=3)) is None
+    finally:
+        await real.aclose()
