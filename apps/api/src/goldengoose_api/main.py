@@ -29,6 +29,7 @@ from goldengoose_api.routers import (
     audit_routes,
     auth_routes,
     chat_routes,
+    graph_routes,
     health_routes,
     source_routes,
     thread_routes,
@@ -131,6 +132,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.include_router(thread_routes.router, prefix=prefix)
     app.include_router(chat_routes.router, prefix=prefix)
     app.include_router(audit_routes.router, prefix=prefix)
+    app.include_router(graph_routes.router, prefix=prefix)
     app.include_router(source_routes.router, prefix=prefix)
     return app
 

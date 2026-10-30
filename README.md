@@ -16,6 +16,10 @@ record warehouse (Postgres), with every answer cited to document ID, revision an
   `compare` in [`nodes.py`](packages/agents/src/gg_agents/nodes.py)).
 - Queries external regulatory sources: openFDA, eCFR, ClinicalTrials.gov, PubMed and web search
   ([`packages/retrieval/src/gg_retrieval/tools/external/`](packages/retrieval/src/gg_retrieval/tools/external/)).
+- Draws one record's neighbourhood in the knowledge graph in the web app's Trace view. Links
+  read from a form field are solid, links mined from document text are dashed, and each link
+  shows its source document, field or page, extraction method and confidence
+  (`GET /graph/trace`, [`apps/api/src/goldengoose_api/graph_trace.py`](apps/api/src/goldengoose_api/graph_trace.py)).
 - Writes every chat turn to an append-only, hash-chained audit log
   ([ADR 0010](docs/adr/0010-append-only-audit-log.md)).
 - Generates its own test corpus: a synthetic QMS for the fictional Halvern Medical infusion pump
@@ -138,7 +142,7 @@ Operating procedures, backup and restore are in [`docs/runbooks/`](docs/runbooks
 
 ```
 apps/api            FastAPI service and LangGraph agent entrypoints
-apps/web            Next.js chat UI with citation side panel
+apps/web            Next.js chat UI with citation side panel, audit prep and graph trace views
 packages/common     settings, provider adapters and fakes, ACL, audit log, object store
 packages/ingestion  registry, parsers, chunking, indexing, graph and register derivation
 packages/retrieval  hybrid search, rerank, graph traversals, guarded SQL, external tools

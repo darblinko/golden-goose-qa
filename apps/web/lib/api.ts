@@ -5,6 +5,7 @@ import type {
   StreamHandlers,
   Thread,
   ThreadDetail,
+  TraceGraph,
 } from "./types";
 
 export const API_URL =
@@ -95,6 +96,11 @@ export function runAuditReport(collectionId?: string): Promise<AuditReport> {
     ? `?collection=${encodeURIComponent(collectionId)}`
     : "";
   return request<AuditReport>(`/audit/report${query}`);
+}
+
+export function getTrace(anchor: string, hops = 2): Promise<TraceGraph> {
+  const query = `?anchor=${encodeURIComponent(anchor)}&hops=${hops}`;
+  return request<TraceGraph>(`/graph/trace${query}`);
 }
 
 /** POST the question and consume the SSE stream. EventSource cannot POST,

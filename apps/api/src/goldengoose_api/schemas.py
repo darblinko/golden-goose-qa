@@ -79,3 +79,35 @@ class AuditReportOut(BaseModel):
     summary: str
     advisory: str
     results: list[AuditCheckResultOut]
+
+
+class TraceNodeOut(BaseModel):
+    id: str
+    label: str
+    key: str
+    title: str | None
+    kind: str
+    hop: int
+    degree: int
+    hidden_links: int
+    properties: dict[str, Any]
+
+
+class TraceEdgeOut(BaseModel):
+    id: str
+    source: str
+    target: str
+    type: str
+    method: str | None
+    locator: str | None
+    source_doc_key: str | None
+    confidence: float | None
+    inferred: bool
+
+
+class TraceOut(BaseModel):
+    anchor: str
+    hops: int
+    nodes: list[TraceNodeOut]
+    edges: list[TraceEdgeOut]
+    truncated: bool

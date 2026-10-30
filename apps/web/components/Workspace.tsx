@@ -14,6 +14,7 @@ import AuditPanel from "./AuditPanel";
 import ChatView from "./ChatView";
 import CitationPanel from "./CitationPanel";
 import ThreadSidebar, { type WorkspaceView } from "./ThreadSidebar";
+import TraceView from "./TraceView";
 
 export interface LiveTurn {
   steps: TraceEvent[];
@@ -184,6 +185,8 @@ export default function Workspace({
       />
       {view === "audit" ? (
         <AuditPanel />
+      ) : view === "trace" ? (
+        <TraceView />
       ) : (
         <>
           <ChatView

@@ -84,3 +84,35 @@ export interface AuditReport {
   advisory: string;
   results: AuditCheckResult[];
 }
+
+export interface TraceGraphNode {
+  id: string;
+  label: string;
+  key: string;
+  title: string | null;
+  kind: string;
+  hop: number;
+  degree: number;
+  hidden_links: number;
+  properties: Record<string, string | number | boolean | null>;
+}
+
+export interface TraceGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  method: string;
+  locator: string;
+  source_doc_key: string;
+  confidence: number;
+  inferred: boolean;
+}
+
+export interface TraceGraph {
+  anchor: string;
+  hops: number;
+  nodes: TraceGraphNode[];
+  edges: TraceGraphEdge[];
+  truncated: boolean;
+}

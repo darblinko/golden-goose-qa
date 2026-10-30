@@ -2,7 +2,7 @@
 
 import type { Thread } from "@/lib/types";
 
-export type WorkspaceView = "chat" | "audit";
+export type WorkspaceView = "chat" | "audit" | "trace";
 
 export default function ThreadSidebar({
   threads,
@@ -43,6 +43,12 @@ export default function ThreadSidebar({
           onClick={() => onViewChange("audit")}
         >
           Audit prep
+        </button>
+        <button
+          className={`view-tab${view === "trace" ? " active" : ""}`}
+          onClick={() => onViewChange("trace")}
+        >
+          Trace
         </button>
       </div>
       <nav className="thread-list">
