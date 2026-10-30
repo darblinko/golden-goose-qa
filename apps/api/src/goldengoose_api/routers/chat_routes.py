@@ -10,18 +10,26 @@ POST /threads/{id}/messages streams the agent turn as named events:
 The turn is durable before it is visible: the assistant message (with verdict,
 citations, and step trace) and the audit event are committed in one transaction
 BEFORE any `delta` text is streamed, so no answer content ever reaches a client
-without a persisted, audited record behind it. A turn that fails mid-flight
-writes a failure audit row before the `error` event.
+without a persisted, audited record behind it. A chat.turn.started audit row is
+committed with the user message. A turn that fails mid-flight writes a failure
+audit row before the `error` event; a turn cancelled by a client disconnect
+before its answer is recorded writes one from shielded cleanup.
 """
 
+import asyncio
 import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, HTTPException, Request
-from gg_agents.audit import build_turn_audit_event, build_turn_failure_audit_event
+from gg_agents.audit import (
+    build_turn_audit_event,
+    build_turn_failure_audit_event,
+    build_turn_started_audit_event,
+)
 from gg_agents.state import AgentState, initial_state
 from gg_common.audit import write_audit_event
 from gg_common.costs import CostLedger, track_costs
@@ -61,7 +69,26 @@ async def post_message(
             raise HTTPException(status_code=404, detail="thread not found")
         history = await threads.recent_history(session, thread_id=tid, role=user.role)
         await threads.add_message(session, thread_id=tid, role="user", content=body.content)
+        await write_audit_event(
+            session,
+            build_turn_started_audit_event(body.content, thread_id=tid, actor=user.subject),
+        )
         await session.commit()
+
+    async def audit_failure(error: str) -> None:
+        # Best-effort: a database outage here must not swallow the error or
+        # cancellation the caller is owed.
+        try:
+            async with state.session_factory() as session:
+                await write_audit_event(
+                    session,
+                    build_turn_failure_audit_event(
+                        body.content, thread_id=tid, actor=user.subject, error=error
+                    ),
+                )
+                await session.commit()
+        except Exception:
+            logger.exception("failure audit write failed for thread %s", tid)
 
     async def turn() -> AsyncIterator[dict[str, str]]:
         trace: list[dict[str, Any]] = []
@@ -73,6 +100,7 @@ async def post_message(
     async def _run_turn(
         trace: list[dict[str, Any]], final: dict[str, Any], costs: CostLedger
     ) -> AsyncIterator[dict[str, str]]:
+        recorded = False
         try:
             config = {"configurable": {"thread_id": tid}}
             stream = state.agent_graph.astream(
@@ -110,6 +138,7 @@ async def post_message(
                 )
                 await write_audit_event(session, audit_event)
                 await session.commit()
+            recorded = True
 
             for delta in _deltas(answer):
                 yield _sse("delta", {"text": delta})
@@ -136,25 +165,19 @@ async def post_message(
                     "usage": usage,
                 },
             )
+        except asyncio.CancelledError:
+            if not recorded:
+                logger.warning("chat turn cancelled for thread %s", tid)
+                # The surrounding scope is being cancelled; shield the audit
+                # write so the cancellation itself cannot interrupt it.
+                with anyio.CancelScope(shield=True):
+                    await audit_failure("cancelled: client disconnected before the answer")
+            raise
         except Exception as exc:
             logger.exception("chat turn failed for thread %s", tid)
             set_span_attributes(error=True)
-            # The failure itself is auditable. Best-effort: a database outage
-            # here must not swallow the error event the client is owed.
-            try:
-                async with state.session_factory() as session:
-                    await write_audit_event(
-                        session,
-                        build_turn_failure_audit_event(
-                            body.content,
-                            thread_id=tid,
-                            actor=user.subject,
-                            error=f"{type(exc).__name__}: {exc}",
-                        ),
-                    )
-                    await session.commit()
-            except Exception:
-                logger.exception("failure audit write failed for thread %s", tid)
+            # The failure itself is auditable.
+            await audit_failure(f"{type(exc).__name__}: {exc}")
             yield _sse("error", {"detail": "the agent turn failed; see server logs"})
 
     return EventSourceResponse(turn(), headers={"Cache-Control": "no-cache, no-transform"})

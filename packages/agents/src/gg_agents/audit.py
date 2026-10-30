@@ -14,6 +14,7 @@ from gg_common.settings import AppSettings
 from gg_agents.state import AgentState
 
 TURN_ACTION = "chat.turn"
+TURN_STARTED_ACTION = "chat.turn.started"
 TURN_FAILURE_ACTION = "chat.turn.failed"
 
 _CITATION_FIELDS = (
@@ -76,6 +77,13 @@ def build_turn_audit_event(
         "external_error": state.get("external_error"),
     }
     return AuditEvent(actor=actor, action=TURN_ACTION, payload=payload)
+
+
+def build_turn_started_audit_event(question: str, *, thread_id: str, actor: str) -> AuditEvent:
+    """Written with the user message, before the agent runs, so a turn that
+    never completes (a killed process, a lost connection) is still on record."""
+    payload: dict[str, Any] = {"thread_id": thread_id, "question": question}
+    return AuditEvent(actor=actor, action=TURN_STARTED_ACTION, payload=payload)
 
 
 def build_turn_failure_audit_event(
