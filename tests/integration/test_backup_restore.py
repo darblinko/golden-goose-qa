@@ -12,6 +12,10 @@ from gg_common.audit import verify_chain
 from gg_common.backup import create_backup, restore_backup, verify_restored_buckets
 from gg_common.objectstore import S3ObjectStore
 from gg_common.settings import get_settings
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg.conninfo import make_conninfo
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -49,18 +53,46 @@ async def _audit_chain_intact() -> tuple[bool, int]:
         await engine.dispose()
 
 
-async def _app_role_owns_checkpoint_tables() -> bool:
-    """The agent checkpointer's tables are created by the app role at runtime
-    and carry no GRANTs — access is by ownership. A restore that flattens
-    ownership onto the admin role locks the agent out of its own memory."""
-    engine = create_async_engine(get_settings().postgres.sqlalchemy_url, poolclass=NullPool)
-    try:
-        async with engine.connect() as conn:
-            row = await conn.execute(text("SELECT count(*) FROM checkpoints.checkpoint_migrations"))
-            row.scalar_one()
-            return True
-    finally:
-        await engine.dispose()
+def _checkpointer_conninfo() -> str:
+    """The same app-role connection the API lifespan gives the checkpointer."""
+    pg = get_settings().postgres
+    return make_conninfo(
+        host=pg.host,
+        port=pg.port,
+        dbname=pg.database,
+        user=pg.user,
+        password=pg.password.get_secret_value(),
+        options="-c search_path=checkpoints",
+    )
+
+
+def _checkpoint_config(thread_id: str) -> RunnableConfig:
+    return {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+
+
+async def _write_checkpoint(thread_id: str) -> str:
+    """Creates the checkpoint tables as the app role (as API startup does) and
+    stores one checkpoint, so the drill does not depend on an API process
+    having run against this database first."""
+    async with AsyncPostgresSaver.from_conn_string(_checkpointer_conninfo()) as saver:
+        await saver.setup()
+        checkpoint = empty_checkpoint()
+        await saver.aput(_checkpoint_config(thread_id), checkpoint, {}, {})
+        return str(checkpoint["id"])
+
+
+async def _read_checkpoint_id(thread_id: str) -> str | None:
+    """Read back as the app role. The checkpoint tables carry no GRANTs, so
+    access is by ownership: a restore that flattens ownership onto the admin
+    role locks the agent out of its own memory and fails here."""
+    async with AsyncPostgresSaver.from_conn_string(_checkpointer_conninfo()) as saver:
+        stored = await saver.aget_tuple(_checkpoint_config(thread_id))
+        return None if stored is None else str(stored.checkpoint["id"])
+
+
+async def _delete_checkpoint_thread(thread_id: str) -> None:
+    async with AsyncPostgresSaver.from_conn_string(_checkpointer_conninfo()) as saver:
+        await saver.adelete_thread(thread_id)
 
 
 async def _execute(statement: str, params: dict[str, Any]) -> None:
@@ -95,6 +127,9 @@ async def test_backup_restore_drill(ingested_corpus, tmp_path):
         {"owner": marker_owner, "title": "backup drill marker"},
     )
 
+    checkpoint_thread = f"drill-{uuid.uuid4()}"
+    checkpoint_id = await _write_checkpoint(checkpoint_thread)
+
     documents_bucket = settings.objectstore.bucket_documents
     keys = store.list_keys(documents_bucket)
     assert keys, "ingested corpus should have populated the documents bucket"
@@ -110,6 +145,8 @@ async def test_backup_restore_drill(ingested_corpus, tmp_path):
         "DELETE FROM app.threads WHERE owner = :owner",
         {"owner": marker_owner},
     )
+    await _delete_checkpoint_thread(checkpoint_thread)
+    assert await _read_checkpoint_id(checkpoint_thread) is None
     store.put(documents_bucket, probe_key, b"corrupted by drill")
     deleted = httpx.delete(
         f"{settings.qdrant.url}/collections/{settings.qdrant.collection}", timeout=60
@@ -121,7 +158,7 @@ async def test_backup_restore_drill(ingested_corpus, tmp_path):
     assert report.postgres_restored and report.qdrant_restored
     assert report.bucket_files_restored > 0
     assert await _thread_exists(marker_owner), "postgres marker row must survive the restore"
-    assert await _app_role_owns_checkpoint_tables()
+    assert await _read_checkpoint_id(checkpoint_thread) == checkpoint_id
     assert store.get(documents_bucket, probe_key) == original_bytes
     assert _qdrant_point_count() == points_before
 
@@ -138,3 +175,4 @@ async def test_backup_restore_drill(ingested_corpus, tmp_path):
         "DELETE FROM app.threads WHERE owner = :owner",
         {"owner": marker_owner},
     )
+    await _delete_checkpoint_thread(checkpoint_thread)
