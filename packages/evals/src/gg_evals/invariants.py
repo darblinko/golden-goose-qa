@@ -26,6 +26,7 @@ class CoverageInvariants:
     pinned_fingerprint: str | None = None  # when set, QA structure must match exactly
     required_patterns: frozenset[str] = frozenset()  # each must be present at all
     min_correctness_scored: int = 0  # answers the correctness gate must score
+    min_exclusion_items: int = 0  # items with must_exclude, so non-leakage is tested
 
 
 # The twelve audit query patterns the golden set is generated for
@@ -60,6 +61,7 @@ FULL_INVARIANTS = CoverageInvariants(
     min_noise_tested=150,
     required_patterns=AUDIT_PATTERNS,
     min_correctness_scored=6,  # currently 9 counts_aggregates items
+    min_exclusion_items=60,  # currently 80
 )
 
 # The smoke subset (currently 30 items after every pattern is represented).
@@ -71,6 +73,7 @@ SMOKE_INVARIANTS = CoverageInvariants(
     min_noise_tested=20,
     required_patterns=AUDIT_PATTERNS,
     min_correctness_scored=2,  # currently 2 counts_aggregates items
+    min_exclusion_items=6,  # currently 9
 )
 
 
@@ -125,6 +128,13 @@ def coverage_failures(
                 f"pattern {pattern!r} has {count} items, "
                 f"below the per-pattern floor {invariants.min_per_pattern}"
             )
+
+    with_exclusions = sum(1 for i in items if i.must_exclude)
+    if with_exclusions < invariants.min_exclusion_items:
+        failures.append(
+            f"only {with_exclusions} items carry must_exclude, below the floor "
+            f"{invariants.min_exclusion_items}"
+        )
 
     tested = len(noise.tested)
     if tested < invariants.min_noise_tested:

@@ -157,3 +157,19 @@ def test_shipped_invariants_require_every_audit_pattern():
     assert SMOKE_INVARIANTS.required_patterns == AUDIT_PATTERNS
     assert FULL_INVARIANTS.min_correctness_scored > 0
     assert SMOKE_INVARIANTS.min_correctness_scored > 0
+
+
+def test_a_set_without_exclusions_fails_the_non_leakage_floor():
+    inv = CoverageInvariants(
+        min_items=6,
+        min_scored=5,
+        max_skip_rate=0.2,
+        min_per_pattern=2,
+        min_noise_tested=4,
+        min_exclusion_items=1,
+    )
+    items = _items(3)
+    failures = coverage_failures(items, _retrieval(8, 1), _noise(6), inv)
+    assert failures == ("only 0 items carry must_exclude, below the floor 1",)
+    items[0] = items[0].model_copy(update={"must_exclude": ["SOP-002"]})
+    assert coverage_failures(items, _retrieval(8, 1), _noise(6), inv) == ()

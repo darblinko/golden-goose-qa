@@ -10,6 +10,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from gg_agents import toolselect
 from gg_retrieval.retriever import HybridRetriever
 from pydantic import BaseModel
 
@@ -195,7 +196,16 @@ async def evaluate(
     results = []
     for item in selected:
         relevant, _ = retrievable_evidence(item.evidence_doc_ids)
-        result = await retriever.retrieve(item.question, top_k=K)
+        # The agent's route node derives the same scope and as-of date, so the
+        # recall and non-leakage figures measure the production retrieval call.
+        scope = toolselect.extract_scope(item.question)
+        result = await retriever.retrieve(
+            item.question,
+            top_k=K,
+            doc_key=scope.doc_key,
+            revision=scope.revision,
+            as_of=toolselect.extract_as_of(item.question),
+        )
         ranked = ranked_doc_keys([c.doc_key for c in result.chunks])
         results.append(
             ItemResult(

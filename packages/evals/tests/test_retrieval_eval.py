@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from typing import cast
 
 from gg_evals.retrieval_eval import (
@@ -87,8 +88,10 @@ class _StubResult:
 class StubRetriever:
     def __init__(self, answers: dict[str, list[str]]):
         self.answers = answers
+        self.calls: list[dict[str, object]] = []
 
-    async def retrieve(self, query: str, *, top_k: int):
+    async def retrieve(self, query: str, *, top_k: int, **scope: object):
+        self.calls.append(scope)
         docs = self.answers.get(query, [])
         return _StubResult(chunks=tuple(_StubChunk(d) for d in docs))
 
@@ -172,3 +175,30 @@ async def test_evaluate_scores_and_skips():
     patterns = report.by_pattern()
     assert patterns["revision_approval"]["recall"] == 1.0
     assert patterns["complaint_mdr"]["recall"] == 0.5
+
+
+async def test_evaluate_applies_the_agent_scope_and_as_of_date():
+    # The agent's route node scopes an exact-record question and an as-of
+    # question; retrieval eval must measure that same production path.
+    scoped = EvalItem(
+        id="qa-scope",
+        question="What triggered CAPA-2025-014?",
+        pattern="capa_thread",
+        evidence_doc_ids=["CAPA-2025-014"],
+        smoke=True,
+    )
+    dated = EvalItem(
+        id="qa-asof",
+        question="What did SOP-004 Rev A require as of 15-Jan-2024?",
+        pattern="revision_approval",
+        evidence_doc_ids=["SOP-004"],
+        smoke=True,
+    )
+    retriever = StubRetriever({})
+    await evaluate(cast(HybridRetriever, retriever), [scoped, dated], smoke_only=True)
+    assert retriever.calls[0] == {"doc_key": "CAPA-2025-014", "revision": None, "as_of": None}
+    assert retriever.calls[1] == {
+        "doc_key": "SOP-004",
+        "revision": "A",
+        "as_of": date(2024, 1, 15),
+    }
