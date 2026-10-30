@@ -23,10 +23,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 pytestmark = pytest.mark.integration
 
 SMOKE_GATE = 0.8
-# The counts_aggregates smoke items carry corpus: pseudo-ids that no retrieval
-# index can contain; they are answered by the record warehouse instead and
-# covered in test_agent_acceptance.py.
-AGGREGATE_SKIPS = 3
+# The counts_aggregates smoke items carry no document evidence; they are
+# answered by the record warehouse instead and covered in
+# test_agent_acceptance.py. The count is _SMOKE_QUOTA["counts_aggregates"] in
+# gg_synthdata.qa.
+AGGREGATE_SKIPS = 2
 
 
 async def test_ingest_retrieve_eval_end_to_end(ingested_corpus, app_engine):
@@ -57,6 +58,10 @@ async def test_ingest_retrieve_eval_end_to_end(ingested_corpus, app_engine):
 
         items = load_items(ingested_corpus["root"] / "qa" / "golden_qa.json")
         eval_report = await evaluate(retriever, items, smoke_only=True)
+        aggregate_smoke_ids = {
+            item.id for item in items if item.smoke and item.pattern == "counts_aggregates"
+        }
+        assert set(eval_report.skipped) == aggregate_smoke_ids, eval_report.skipped
         assert len(eval_report.skipped) == AGGREGATE_SKIPS, eval_report.skipped
         assert eval_report.results, "no evaluable smoke items"
         assert eval_report.recall >= SMOKE_GATE, eval_report.as_dict()
