@@ -60,8 +60,12 @@ def parsed_from_artifact(data: bytes) -> ParsedDocument:
     )
 
 
-async def indexed_documents(session: AsyncSession) -> list[RegistryDocument]:
-    """The currently effective indexed version per doc_key. Graph and
+async def indexed_documents(
+    session: AsyncSession, today: date | None = None
+) -> list[RegistryDocument]:
+    """The indexed version in force today per doc_key, chosen by the same
+    [effective_from, effective_to) window retrieval uses, so a revision
+    published ahead of its effective date is not derived early. Graph and
     registers describe present QMS state; superseded revisions contribute
     nothing here (their history already lives in the effective document's
     revision-history table). Tombstoned documents are excluded, so a retired
@@ -75,10 +79,15 @@ async def indexed_documents(session: AsyncSession) -> list[RegistryDocument]:
             FROM app.documents d
             JOIN app.document_versions v ON v.document_id = d.id
             WHERE v.pipeline_state = 'indexed' AND d.deleted_at IS NULL
-            ORDER BY d.doc_key, (v.status = 'effective') DESC,
+            ORDER BY d.doc_key,
+                     (v.status = 'effective'
+                      AND (v.effective_from IS NULL OR v.effective_from <= :today)
+                      AND (v.effective_to IS NULL OR v.effective_to > :today)) DESC,
+                     (v.status = 'effective') DESC,
                      v.effective_from DESC NULLS LAST, v.created_at DESC
             """
-        )
+        ),
+        {"today": today or date.today()},
     )
     return [
         RegistryDocument(

@@ -384,21 +384,30 @@ async def replace_chunks(session: AsyncSession, version_id: str, chunks: list[Ch
             )
 
 
-def plan_supersessions(versions: list[VersionLifecycle]) -> list[SupersedePlan]:
-    """Compute lifecycle transitions for one document's indexed versions: the
-    latest effective_from stays effective and open-ended; every earlier
-    version becomes obsolete, closed at its successor's effective date. Only
-    versions whose recorded state differs are returned."""
+def plan_supersessions(
+    versions: list[VersionLifecycle], today: date | None = None
+) -> list[SupersedePlan]:
+    """Compute lifecycle transitions for one document's indexed versions.
+
+    Every version is closed at its successor's effective date, so the
+    [effective_from, effective_to) windows never overlap. A version becomes
+    obsolete only once its successor is in force (successor undated, or dated
+    on or before `today`); a revision published ahead of its effective date
+    leaves its predecessor effective until then. Retrieval and derivation
+    select by the window, so they agree on the revision in force on any date.
+    Only versions whose recorded state differs are returned."""
     if len(versions) < 2:
         return []
+    today = today or date.today()
     ordered = sorted(
         versions, key=lambda v: (v.effective_from or date.min, v.created_at, v.version_id)
     )
     plans = []
     for version, successor in itertools.pairwise(ordered):
+        successor_in_force = successor.effective_from is None or successor.effective_from <= today
         target = SupersedePlan(
             version_id=version.version_id,
-            status="obsolete",
+            status="obsolete" if successor_in_force else "effective",
             effective_to=successor.effective_from,
         )
         if (version.status, version.effective_to) != (target.status, target.effective_to):

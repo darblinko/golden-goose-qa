@@ -70,3 +70,28 @@ def test_undated_versions_order_by_arrival():
         ]
     )
     assert plans == [SupersedePlan(version_id="v-1", status="obsolete", effective_to=None)]
+
+
+def test_future_revision_leaves_predecessor_in_effect_until_its_date():
+    """Publishing B ahead of its effective date must not take A out of force:
+    A stays effective, closed at B's start, so the [from, to) window serves A
+    today and B from its effective date."""
+    versions = [
+        _version("v-a", date(2026, 3, 1)),
+        _version("v-b", date(2027, 1, 1), created_minute=1),
+    ]
+    plans = plan_supersessions(versions, today=date(2026, 10, 30))
+    assert plans == [
+        SupersedePlan(version_id="v-a", status="effective", effective_to=date(2027, 1, 1))
+    ]
+
+
+def test_predecessor_becomes_obsolete_once_successor_date_passes():
+    versions = [
+        _version("v-a", date(2026, 3, 1), effective_to=date(2027, 1, 1)),
+        _version("v-b", date(2027, 1, 1), created_minute=1),
+    ]
+    plans = plan_supersessions(versions, today=date(2027, 1, 1))
+    assert plans == [
+        SupersedePlan(version_id="v-a", status="obsolete", effective_to=date(2027, 1, 1))
+    ]
