@@ -44,7 +44,8 @@ UI has no state of its own.
 uv run gg-ingest run --corpus <dir>   # ingest; unchanged files skip by content hash
 uv run gg-ingest status               # registry counts per document state
 uv run gg-ingest derive               # rebuild knowledge graph + register warehouse
-uv run gg-ingest sync                 # re-check source dirs for changes
+uv run gg-ingest sync --source-root <src> --staging <dir> [--ingest]
+                                      # copy source changes into the staging corpus
 ```
 
 `derive` is idempotent and safe to re-run at any time; it reprojects from

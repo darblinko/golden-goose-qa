@@ -2,12 +2,14 @@
 
 Agentic question answering over a medical device quality management system, built for regulatory
 audit support: a LangGraph agent over hybrid retrieval (Qdrant), a knowledge graph (Neo4j) and a
-record warehouse (Postgres), with every answer cited to document ID, revision and page.
+record warehouse (Postgres). Answers from retrieved text cite document ID and revision, plus page
+for PDF sources; graph and register answers cite the tool result and the document IDs it read.
 
 ## What it does
 
 - Answers questions about controlled documents, quality records and design controls, with
-  document ID, revision and page citations in each answer
+  document ID and revision citations (page for PDF sources; the IDs a tool read for graph and
+  register answers)
   ([`docs/validation/intended-use.md`](docs/validation/intended-use.md)).
 - Routes count questions to the Postgres register warehouse and trace questions to fixed Neo4j
   traversals. Rate comparison questions get a warehouse count and an external count, reported

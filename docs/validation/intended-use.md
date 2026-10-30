@@ -16,8 +16,10 @@ Decision **support** during regulatory audit preparation and live audit
 response: locating governing procedures, walking traceability from a
 requirement to its verification evidence, retrieving the state and history of
 quality records, and producing counts and summaries — each answer carrying
-citations (document ID, revision, page) that the user verifies against the
-controlled source before relying on it.
+citations that the user verifies against the controlled source before relying
+on it. Text answers cite document ID and revision, with a page for PDF sources
+(DOCX parsing yields no page numbers). Graph and register answers cite the tool
+result and the document IDs it read, without revision or page.
 
 ## Intended users
 

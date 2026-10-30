@@ -34,17 +34,24 @@ which the system produces a wrong or unsafe answer.
 - **Revisit when:** The API scales horizontally — then the window must move to a
   shared store (Redis or Postgres) so limits are enforced across instances.
 
-## Auth is Better Auth JWT; OIDC and httpOnly-cookie tokens are deferred
+## Auth is a local dev token; Better Auth, OIDC and cookie tokens are not implemented
 
-- **What:** Authentication is bearer-JWT per [ADR-0007](../adr/0007-auth-better-auth-jwt.md).
-  Full OIDC federation and moving tokens into httpOnly cookies are not
-  implemented.
-- **Why acceptable:** Authentication fails closed: a request without a valid
-  identity is rejected (`tests/unit/test_api_auth.py`). What remains deferred is
-  federation and a hardened token transport, which are posture improvements
-  rather than open holes.
-- **Revisit when:** Real external identity providers must be integrated, or the
-  browser client's token storage is threat-modeled for XSS token theft.
+- **What:** [ADR-0007](../adr/0007-auth-better-auth-jwt.md) chose Better Auth
+  with EdDSA JWTs and a JWKS endpoint. None of that is built. The API validates
+  HS256 JWTs signed with a shared secret, and the browser gets its token from
+  `POST /auth/dev-token`, which accepts any email and role. That route exists
+  only when the environment is `local` or `ci`. There is no signup, session
+  store, role administration, OIDC federation or httpOnly-cookie transport; the
+  token is held by the browser client.
+- **Why acceptable:** The project runs as a local and CI demonstration.
+  Requests without a valid token are rejected (`tests/unit/test_api_auth.py`),
+  and the dev-token route is absent outside `local` and `ci`.
+- **Consequence:** A deployment in any other environment cannot sign users in.
+  Role claims from the dev token are self-asserted, so role-based access is a
+  demonstration of enforcement, not of identity proofing.
+- **Revisit when:** The application is deployed for real users; an identity
+  provider must then issue the tokens and the browser token storage must be
+  threat-modeled for XSS token theft.
 
 ## Eval battery uses hand-rolled metrics, not DeepEval / RAGAS
 

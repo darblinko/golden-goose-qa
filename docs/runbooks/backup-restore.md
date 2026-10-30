@@ -77,7 +77,7 @@ as the database protects against operator error, not hardware loss.
 - Database **roles** (`gg_admin`, `gg_app`, and the restricted-read roles) are
   cluster-level and are not in the dump. On a brand-new Postgres volume, start
   the compose service (which creates `gg_admin`) and apply migrations once
-  (`uv run alembic upgrade head`) before restoring, so all roles referenced by
+  (`uv run alembic -c infra/migrations/alembic.ini upgrade head`) before restoring, so all roles referenced by
   the dump's GRANTs exist.
 - Restore replaces the whole database. Anything written after the backup
   timestamp is gone — take a fresh backup before restoring if the current
