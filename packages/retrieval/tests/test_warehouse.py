@@ -5,6 +5,7 @@ switch, timeout, LIMIT wrapping, rollback — without a live Postgres. The
 saved-query catalogue itself must pass the same guard as ad-hoc SQL.
 """
 
+from datetime import date
 from typing import cast
 
 import pytest
@@ -112,6 +113,14 @@ class TestSavedQueries:
         await tool.run_saved("training_for_document", {"doc_key": "SOP-004"})
         _, params = session.statements[-1]
         assert params == {"doc_key": "SOP-004"}
+
+    async def test_as_of_overdue_query_evaluates_on_the_given_date(self):
+        tool, session = make_tool([])
+        await tool.run_saved("overdue_capa_effectiveness_as_of", {"as_of": date(2026, 7, 1)})
+        sql, params = session.statements[-1]
+        assert params == {"as_of": date(2026, 7, 1)}
+        assert "CURRENT_DATE" not in sql
+        assert "effectiveness_overdue" not in sql
 
 
 class TestAdHoc:

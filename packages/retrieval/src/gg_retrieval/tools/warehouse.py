@@ -187,6 +187,25 @@ SAVED_QUERIES: dict[str, SavedQuery] = {
         ),
         source="registers.v_capa_register",
     ),
+    "overdue_capa_effectiveness_as_of": SavedQuery(
+        title="CAPAs with effectiveness checks overdue on the as-of date",
+        description=(
+            "CAPAs opened by the as-of date whose effectiveness check was due before"
+            " it and not completed by it. Evaluated on that date, not today."
+        ),
+        sql=(
+            "SELECT capa_id, opened, owner, status, effectiveness_due,"
+            " effectiveness_completed, closed, CAST(:as_of AS DATE) AS as_of"
+            " FROM registers.v_capa_register"
+            " WHERE opened <= CAST(:as_of AS DATE)"
+            " AND effectiveness_due < CAST(:as_of AS DATE)"
+            " AND (effectiveness_completed IS NULL"
+            " OR effectiveness_completed > CAST(:as_of AS DATE))"
+            " ORDER BY effectiveness_due"
+        ),
+        source="registers.v_capa_register",
+        params=("as_of",),
+    ),
     "complaints_without_risk_evaluation": SavedQuery(
         title="Complaints without a documented risk evaluation",
         description="Complaint files whose risk evaluation field is empty.",

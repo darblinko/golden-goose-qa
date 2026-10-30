@@ -355,7 +355,7 @@ class WarehousePlan:
     """Either a saved query (name + params) or deterministic ad-hoc SQL."""
 
     saved: str | None = None
-    params: dict[str, str] | None = None
+    params: dict[str, object] | None = None
     sql: str | None = None
     title: str | None = None
 
@@ -366,8 +366,15 @@ def warehouse_plan(question: str) -> WarehousePlan:
         return count_plan
 
     lowered = question.lower()
+    as_of = extract_as_of(question)
     if "overdue" in lowered and "effectiveness" in lowered:
+        if as_of is not None:
+            return WarehousePlan(saved="overdue_capa_effectiveness_as_of", params={"as_of": as_of})
         return WarehousePlan(saved="overdue_capa_effectiveness")
+    if as_of is not None:
+        # The other saved queries describe the registers as they are now (open
+        # status, ages against today); none can be evaluated on a past date.
+        return _COUNT_REFUSAL
     if "open" in lowered and "capa" in lowered:
         return WarehousePlan(saved="open_capas")
     if "open" in lowered and ("ncr" in lowered or "nonconform" in lowered):

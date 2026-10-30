@@ -257,8 +257,24 @@ class TestWarehousePlan:
         assert plan.sql == "SELECT count(*) AS total FROM registers.v_capa_register"
 
     def test_overdue_effectiveness_uses_saved_query(self):
-        plan = warehouse_plan("As of 2026-07-01, are any CAPA effectiveness checks overdue?")
+        plan = warehouse_plan("Are any CAPA effectiveness checks overdue?")
         assert plan.saved == "overdue_capa_effectiveness"
+        assert plan.params is None
+
+    def test_as_of_overdue_effectiveness_binds_the_date(self):
+        plan = warehouse_plan("As of 2026-07-01, are any CAPA effectiveness checks overdue?")
+        assert plan.saved == "overdue_capa_effectiveness_as_of"
+        assert plan.params == {"as_of": date(2026, 7, 1)}
+
+    def test_as_of_on_a_current_state_query_refuses(self):
+        # Open CAPAs, supplier audit ageing and the other saved queries describe
+        # the registers as they are now; a historical date cannot be applied.
+        for question in (
+            "As of 2025-01-01, which CAPAs were open?",
+            "As of March 2025, which suppliers were overdue for audit?",
+        ):
+            plan = warehouse_plan(question)
+            assert plan.saved is None and plan.sql is None, question
 
     def test_complaints_without_risk_evaluation(self):
         plan = warehouse_plan("Were all complaints evaluated against the risk management file?")
