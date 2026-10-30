@@ -7,6 +7,7 @@ from gg_agents.toolselect import (
     external_plan,
     extract_as_of,
     extract_scope,
+    find_identifiers,
     graph_plan,
     is_rate_comparison,
     route_override,
@@ -86,6 +87,49 @@ class TestExtractScope:
     def test_review_is_not_a_revision(self):
         scope = extract_scope("Review SOP-004 for completeness.")
         assert (scope.doc_key, scope.revision) == ("SOP-004", None)
+
+    def test_record_ids_become_scope(self):
+        # Record ids are exact-record questions: retrieval is scoped to the
+        # record so another record cannot stand in as cited evidence.
+        for question, key in (
+            ("What happened in CAPA-9999-999?", "CAPA-9999-999"),
+            ("What happened in C-2025-0142?", "C-2025-0142"),
+            ("What was found in NCR-2024-001?", "NCR-2024-001"),
+            ("When was MDR-0001 submitted?", "MDR-0001"),
+            ("Who led internal audit AUD-2024-01?", "AUD-2024-01"),
+            ("What period did MRM-2025-02 cover?", "MRM-2025-02"),
+            ("What does EMDR-0003 report?", "EMDR-0003"),
+        ):
+            assert extract_scope(question).doc_key == key, question
+
+    def test_matrix_entities_do_not_scope(self):
+        # REQ, SUP, DO and VTP ids live inside matrices; no corpus file carries
+        # them as a doc_key, so scoping to one would return nothing.
+        assert extract_scope("Which supplier is SUP-004?").doc_key is None
+        assert extract_scope("Which report verifies REQ-017?").doc_key is None
+
+    def test_record_and_document_together_are_ambiguous(self):
+        assert extract_scope("Was CAPA-2024-001 handled per SOP-004?").doc_key is None
+
+
+class TestFindIdentifiers:
+    def test_kinds(self):
+        assert find_identifiers(
+            "REQ-017 SUP-004 CAPA-2025-014 C-2025-0142 AUD-2024-01 WI-MFG-014 SOP-004"
+        ) == [
+            ("requirement", "REQ-017"),
+            ("entity", "SUP-004"),
+            ("record", "CAPA-2025-014"),
+            ("record", "C-2025-0142"),
+            ("event_doc", "AUD-2024-01"),
+            ("document", "WI-MFG-014"),
+            ("document", "SOP-004"),
+        ]
+
+    def test_routing_and_scoping_read_the_same_record(self):
+        question = "What happened in C-2025-0142?"
+        assert route_override(question) == "record"
+        assert extract_scope(question).doc_key == "C-2025-0142"
 
 
 class TestRouteOverride:

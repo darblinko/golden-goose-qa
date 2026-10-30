@@ -11,13 +11,47 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
-_REQ_ID_RE = re.compile(r"\bREQ-\d+\b")
-# Document keys are one or more uppercase segments ending in a 3-digit number:
-# SOP-013, QM-001, and compound keys like WI-MFG-014. Matching the whole key
-# (not just its MFG-014 tail) is what lets an as-of question about WI-MFG-014
-# resolve the real document instead of a phantom substring.
-_DOC_KEY_RE = re.compile(r"\b[A-Z]{2,6}(?:-[A-Z]{2,6})*-\d{3}\b")
-_RECORD_ID_RE = re.compile(r"\b(?:CAPA|NCR|MDR)-\d{4}(?:-\d+)?\b|\bC-\d{4}-\d{3,}\b")
+# One identifier parser serves routing, retrieval scoping and tool plans, so a
+# record id the router recognizes is also the id retrieval is scoped to. Each
+# alternative is a named kind; the scan runs left to right and the first
+# alternative that matches at a position wins, so REQ-017 and SUP-004 are read
+# as entities before the generic document-key form can claim them.
+#   requirement  REQ-017 (a row inside TM-100, answered from the graph)
+#   entity       SUP-004, DO-012, VTP-003 (matrix entities, never a corpus file)
+#   record       CAPA-2025-014, NCR-2024-001, MDR-2025-003, C-2025-0142
+#   event_doc    AUD-2024-01, MRM-2025-01, ASR-2024-01, EMDR-0001, DHR-L250007
+#   document     SOP-013, QM-001 and compound keys like WI-MFG-014; matching the
+#                whole key (not its MFG-014 tail) keeps a phantom substring out.
+_IDENTIFIER_RE = re.compile(
+    r"\b(?:"
+    r"(?P<requirement>REQ-\d+)"
+    r"|(?P<entity>(?:SUP|DO|VTP)-\d{3})"
+    r"|(?P<record>(?:CAPA|NCR|MDR)-\d{4}(?:-\d+)?|C-\d{4}-\d{3,})"
+    r"|(?P<event_doc>(?:AUD|MRM|ASR)-\d{4}-\d{2}|EMDR-\d{4}|DHR-[A-Z0-9]+)"
+    r"|(?P<document>[A-Z]{2,6}(?:-[A-Z]{2,6})*-\d{3})"
+    r")\b"
+)
+# Kinds that name one corpus file and so can scope retrieval to it.
+_SCOPABLE_KINDS = frozenset({"record", "event_doc", "document"})
+
+
+def find_identifiers(question: str) -> list[tuple[str, str]]:
+    """(kind, identifier) for every distinct identifier, in order of first
+    mention."""
+    found: list[tuple[str, str]] = []
+    for match in _IDENTIFIER_RE.finditer(question):
+        kind = match.lastgroup
+        assert kind is not None
+        pair = (kind, match.group(kind))
+        if pair not in found:
+            found.append(pair)
+    return found
+
+
+def _first_identifier(question: str, kind: str) -> str | None:
+    return next((ident for k, ident in find_identifiers(question) if k == kind), None)
+
+
 # Thread-walk intent: a record id paired with any of these asks for the graph
 # thread around the record (source, escalation, filing), not vector retrieval
 # of the single record's text.
@@ -235,13 +269,14 @@ def route_override(question: str) -> str | None:
 
     Checked before the LLM router; order matters (a question naming REQ-017
     is a trace walk even when it also says "which requirements lack...")."""
-    if _REQ_ID_RE.search(question):
+    kinds = {kind for kind, _ in find_identifiers(question)}
+    if "requirement" in kinds:
         return "trace"
     if _UNVERIFIED_RE.search(question):
         return "trace"
-    if _TRAINING_RE.search(question) and _DOC_KEY_RE.search(question):
+    if _TRAINING_RE.search(question) and "document" in kinds:
         return "trace"
-    if _RECORD_ID_RE.search(question) and _THREAD_WALK_RE.search(question):
+    if "record" in kinds and _THREAD_WALK_RE.search(question):
         # "Walk me through CAPA-2025-014 end to end" is a graph thread walk, not
         # vector retrieval of the single record — route it to graph_walk.
         return "trace"
@@ -260,7 +295,7 @@ def route_override(question: str) -> str | None:
         return "aggregate"
     if re.search(r"\bwhich suppliers?\b", question, re.IGNORECASE):
         return "aggregate"
-    if _RECORD_ID_RE.search(question):
+    if "record" in kinds:
         return "record"
     return None
 
@@ -308,25 +343,21 @@ class RetrievalScope:
 _REVISION_RE = re.compile(r"\b[Rr]ev(?:ision)?\.?\s+([A-Z]{1,2}\d{0,3}|\d{1,3})\b")
 
 
-def _unique_doc_keys(question: str) -> list[str]:
-    seen: list[str] = []
-    for key in _DOC_KEY_RE.findall(question):
-        if key not in seen:
-            seen.append(key)
-    return seen
+def _scopable_keys(question: str) -> list[str]:
+    return [ident for kind, ident in find_identifiers(question) if kind in _SCOPABLE_KINDS]
 
 
 def extract_scope(question: str) -> RetrievalScope:
     """Deterministic document + exact-revision scope for retrieval.
 
-    Exactly one distinct document key in the question is a hard doc_key filter;
-    an accompanying revision token becomes an exact revision filter. Two or more
-    distinct keys are ambiguous (a comparison, not one-document scope) and yield
+    Exactly one distinct document key or record id in the question is a hard
+    doc_key filter; an accompanying revision token becomes an exact revision
+    filter. Two or more distinct keys are ambiguous (a comparison, not one-document scope) and yield
     no scope. A revision with no single doc key is dropped — a bare revision
     cannot be pinned to a document. This turns the lexical hints the question
     only implies into the enforced non-leakage boundary retrieval applies to
     both channels, preserved across query rewrites via agent state."""
-    keys = _unique_doc_keys(question)
+    keys = _scopable_keys(question)
     if len(keys) != 1:
         return RetrievalScope()
     match = _REVISION_RE.search(question)
@@ -388,9 +419,9 @@ def warehouse_plan(question: str) -> WarehousePlan:
     if "supplier" in lowered:
         return WarehousePlan(saved="supplier_audit_aging")
     if "training" in lowered:
-        doc_key = _DOC_KEY_RE.search(question)
+        doc_key = _first_identifier(question, "document")
         if doc_key:
-            return WarehousePlan(saved="training_for_document", params={"doc_key": doc_key.group()})
+            return WarehousePlan(saved="training_for_document", params={"doc_key": doc_key})
     if "requirement" in lowered and "verif" in lowered:
         return WarehousePlan(saved="unverified_requirements")
     if "mdr" in lowered or "medical device report" in lowered:
@@ -642,20 +673,20 @@ class GraphPlan:
 
 
 def graph_plan(question: str) -> GraphPlan:
-    req_id = _REQ_ID_RE.search(question)
+    req_id = _first_identifier(question, "requirement")
     if req_id:
-        return GraphPlan(method="requirement_trace", argument=req_id.group())
-    doc_key = _DOC_KEY_RE.search(question)
+        return GraphPlan(method="requirement_trace", argument=req_id)
+    doc_key = _first_identifier(question, "document")
     if _TRAINING_RE.search(question) and doc_key:
-        return GraphPlan(method="training_status", argument=doc_key.group())
-    record_id = _RECORD_ID_RE.search(question)
+        return GraphPlan(method="training_status", argument=doc_key)
+    record_id = _first_identifier(question, "record")
     if record_id:
         # The full record id (e.g. CAPA-2025-014, C-2025-0142) anchors the
-        # thread walk; the record-id regex captures the whole id, not the
-        # 3-digit tail a document-key regex would stop at.
-        return GraphPlan(method="record_thread", argument=record_id.group())
+        # thread walk; the parser captures the whole id, not the 3-digit tail
+        # a document-key form would stop at.
+        return GraphPlan(method="record_thread", argument=record_id)
     if _UNVERIFIED_RE.search(question):
         return GraphPlan(method="unverified_requirements")
     if doc_key:
-        return GraphPlan(method="document_profile", argument=doc_key.group())
+        return GraphPlan(method="document_profile", argument=doc_key)
     return GraphPlan(method="unverified_requirements")

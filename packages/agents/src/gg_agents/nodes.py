@@ -151,6 +151,14 @@ def _retrieval_levels(state: AgentState) -> tuple[str, ...] | None:
     return None if levels == acl.ACCESS_LEVELS else levels
 
 
+def _in_scope(item: Any, state: AgentState) -> bool:
+    doc_key = state.get("doc_key")
+    revision = state.get("revision")
+    if doc_key and item.doc_key != doc_key:
+        return False
+    return not (revision and item.revision != revision)
+
+
 def _prompt_hash(messages: list[ChatMessage]) -> str:
     material = "\x1e".join(f"{m.role}:{m.content}" for m in messages)
     return hashlib.sha256(material.encode()).hexdigest()
@@ -269,19 +277,25 @@ class AgentNodes:
             as_of=date.fromisoformat(as_of_iso) if as_of_iso else None,
             allowed_levels=_retrieval_levels(state),
         )
+        # The search filter already applies the scope; dropping anything outside
+        # it here keeps an exact-record or exact-revision question from citing a
+        # different record when the filter is bypassed or misconfigured. An
+        # absent record then ends at no_evidence instead of a neighbour's text.
+        chunks = [c for c in result.chunks if _in_scope(c, state)]
+        parents = [p for p in result.parents if _in_scope(p, state)]
         _emit(
             {
                 "event": "step",
                 "node": "retrieve",
                 "query": state["query"],
-                "n_chunks": len(result.chunks),
-                "n_parents": len(result.parents),
+                "n_chunks": len(chunks),
+                "n_parents": len(parents),
                 "timings_ms": result.timings_ms,
             }
         )
         return {
-            "chunks": [chunk_to_dict(c) for c in result.chunks],
-            "parents": [parent_to_dict(p) for p in result.parents],
+            "chunks": [chunk_to_dict(c) for c in chunks],
+            "parents": [parent_to_dict(p) for p in parents],
         }
 
     @traced("agent.grade")

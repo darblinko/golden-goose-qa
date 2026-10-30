@@ -354,6 +354,35 @@ async def test_explicit_revision_scope_threads_and_persists_across_rewrites():
     assert final["verdict"] == "insufficient_evidence"
 
 
+UNRELATED_RECORD_PARENT = ParentContext(
+    parent_id="44444444-4444-5444-8444-444444444444",
+    doc_key="CAPA-2024-001",
+    doc_type="capa",
+    title="CAPA-2024-001",
+    revision=None,
+    section_path="Form",
+    text="Root cause: operator error during wire bonding.",
+    context_header="CAPA-2024-001 (capa)",
+    best_child_score=0.7,
+)
+
+
+async def test_absent_exact_record_is_refused_not_answered_from_another_record():
+    # A question naming one record id is scoped to that record. Retrieval that
+    # returns a different record (here CAPA-2024-001 for CAPA-9999-999) must not
+    # become cited evidence; the turn refuses instead.
+    question = "What happened in CAPA-9999-999?"
+    retriever = StubRetriever([UNRELATED_RECORD_PARENT], [])
+    graph = build_agent_graph(make_deps({}, retriever, llm_is_fake=True))
+    final = await graph.ainvoke(initial_state(question))
+
+    assert final["pattern"] == "record"
+    assert {c["doc_key"] for c in retriever.calls} == {"CAPA-9999-999"}
+    assert final["verdict"] == "insufficient_evidence"
+    assert final["answer"] == NO_EVIDENCE_ANSWER
+    assert final["citations"] == []
+
+
 async def test_count_question_answers_from_warehouse_without_retrieval():
     retriever = StubRetriever([PARENT], [CHUNK])
     warehouse = StubWarehouse(result=WAREHOUSE_RESULT)
@@ -535,11 +564,18 @@ async def test_unparseable_verifier_output_withholds_after_retry():
 
 
 async def test_verifier_sees_original_citation_markers():
+    # Unscoped question: two documents may both be evidence.
+    question = "What do the procedures require for effectiveness verification?"
     retriever = StubRetriever([PARENT, PARENT2], [CHUNK])
-    canned = canned_responses(**{"Sources:": "Obsolete documents are removed [2]."})
+    canned = canned_responses(
+        **{
+            "Sources:": "Obsolete documents are removed [2].",
+            question: '{"pattern": "procedure", "doc_type": "sop"}',
+        }
+    )
     deps = make_deps(canned, retriever)
     graph = build_agent_graph(deps)
-    final = await graph.ainvoke(initial_state(QUESTION))
+    final = await graph.ainvoke(initial_state(question))
 
     llm = cast(FakeLLMProvider, deps.llm)
     verifier_calls = [c for c in llm.calls if "Cited sources:" in c[-1].content]
