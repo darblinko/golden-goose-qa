@@ -210,7 +210,8 @@ class GeminiOCRProvider(OCRProvider):
         mime_type = _image_mime_type(image_bytes)
         response = await self._client.post(
             f"/v1beta/models/{self.model}:generateContent",
-            params={"key": self._api_key},
+            # Header, not the `key` query parameter: request URLs are logged.
+            headers={"x-goog-api-key": self._api_key},
             json={
                 "contents": [
                     {

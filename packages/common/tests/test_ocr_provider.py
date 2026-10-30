@@ -86,3 +86,17 @@ def _request_json(captured: list[httpx.Request]) -> dict:
 
     assert len(captured) == 1
     return json.loads(captured[0].content)
+
+
+async def test_api_key_sent_in_header_not_url():
+    # httpx logs every request URL at INFO; a key in the query string would be
+    # written to the application log.
+    captured: list[httpx.Request] = []
+    provider = _provider_with_capture(captured)
+
+    await provider.ocr_page(_PNG, page_number=1)
+
+    request = captured[0]
+    assert "key" not in request.url.params
+    assert "test-key" not in str(request.url)
+    assert request.headers["x-goog-api-key"] == "test-key"
