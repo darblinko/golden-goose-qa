@@ -103,7 +103,9 @@ class _FakeSession:
     async def rollback(self) -> None:
         self._events.append(f"{self._label}:rollback")
 
-    async def execute(self, *args: object, **kwargs: object) -> Any:
+    async def execute(self, clause: object, *args: object, **kwargs: object) -> Any:
+        if "pg_advisory_xact_lock" in str(clause):
+            return None  # the processing transaction takes the document lock first
         raise AssertionError("no SQL expected on the stage-failure path")
 
 

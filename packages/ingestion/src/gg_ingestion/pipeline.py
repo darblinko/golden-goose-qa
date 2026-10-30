@@ -358,6 +358,10 @@ class IngestionPipeline:
     ) -> IngestResult:
         async with self.session_factory() as session:
             try:
+                # Registration committed and released its lock. Hold it again for
+                # processing so the revision check and the indexed state commit
+                # before another version of this document can run the check.
+                await registry.lock_document(session, registration.doc_key)
                 result = await self._process_stages(
                     session,
                     route=route,

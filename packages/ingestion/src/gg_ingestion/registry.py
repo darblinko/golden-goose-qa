@@ -132,6 +132,15 @@ async def assert_unique_revision(
         )
 
 
+async def lock_document(session: AsyncSession, doc_key: str) -> None:
+    """Take the per-document ingest lock for the rest of the transaction. It is
+    transaction-scoped, so it releases at commit or rollback on every path."""
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_class, hashtext(:doc_key))"),
+        {"lock_class": _INGEST_LOCK_CLASS, "doc_key": doc_key},
+    )
+
+
 async def register_version(
     session: AsyncSession,
     *,
@@ -144,12 +153,8 @@ async def register_version(
     # Serialize all registration and version creation for this document key.
     # Without it, two concurrent ingests of the same source both pass the
     # version-existence check below and both insert, forking the document's
-    # version history. A transaction-scoped advisory lock releases automatically
-    # at commit or rollback, so no explicit unlock is needed on any path.
-    await session.execute(
-        text("SELECT pg_advisory_xact_lock(:lock_class, hashtext(:doc_key))"),
-        {"lock_class": _INGEST_LOCK_CLASS, "doc_key": meta.doc_key},
-    )
+    # version history.
+    await lock_document(session, meta.doc_key)
     row = (
         await session.execute(
             text(
