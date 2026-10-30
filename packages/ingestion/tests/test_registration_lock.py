@@ -43,7 +43,7 @@ def _new_version_session() -> _RecordingSession:
     return _RecordingSession(
         [
             _Result(),  # advisory lock (result ignored)
-            _Result(SimpleNamespace(id="doc-1")),  # documents upsert
+            _Result(SimpleNamespace(id="doc-1", tombstoned=False)),  # documents upsert
             _Result(None),  # no existing version
             _Result(SimpleNamespace(id="ver-1")),  # version insert
         ]

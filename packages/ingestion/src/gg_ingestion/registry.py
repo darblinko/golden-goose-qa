@@ -42,6 +42,9 @@ class RegisteredVersion:
     content_hash: str
     doc_key: str
     created: bool
+    # The document was retired (deleted_at set) before this registration; it is
+    # restored only once this version is indexed again.
+    tombstoned: bool = False
 
 
 @dataclass(frozen=True)
@@ -157,13 +160,14 @@ async def register_version(
                     SET doc_type = EXCLUDED.doc_type,
                         title = EXCLUDED.title,
                         updated_at = now()
-                RETURNING id
+                RETURNING id, deleted_at IS NOT NULL AS tombstoned
                 """
             ),
             {"doc_key": meta.doc_key, "doc_type": meta.doc_type, "title": meta.title},
         )
     ).one()
     document_id = str(row.id)
+    tombstoned = bool(row.tombstoned)
 
     # Scope the idempotency lookup to this document: two distinct doc_keys may
     # legitimately share identical bytes (a boilerplate form, an empty template),
@@ -185,6 +189,7 @@ async def register_version(
             content_hash=content_hash,
             doc_key=meta.doc_key,
             created=False,
+            tombstoned=tombstoned,
         )
 
     version = (
@@ -216,7 +221,37 @@ async def register_version(
         content_hash=content_hash,
         doc_key=meta.doc_key,
         created=True,
+        tombstoned=tombstoned,
     )
+
+
+async def restore_document(session: AsyncSession, *, document_id: str, version_id: str) -> bool:
+    """Clear a retired document's tombstone once `version_id` is indexed again.
+
+    Retirement removed every revision's chunks and points, so the other
+    versions return to 'registered': they are reindexed when their files are
+    ingested again, instead of counting as indexed with no searchable content.
+    Returns True when a tombstone was cleared."""
+    cleared = (
+        await session.execute(
+            text(
+                "UPDATE app.documents SET deleted_at = NULL, updated_at = now() "
+                "WHERE id = :document_id AND deleted_at IS NOT NULL RETURNING id"
+            ),
+            {"document_id": document_id},
+        )
+    ).first()
+    if cleared is None:
+        return False
+    await session.execute(
+        text(
+            "UPDATE app.document_versions SET pipeline_state = 'registered', updated_at = now() "
+            "WHERE document_id = :document_id AND id <> :version_id "
+            "AND pipeline_state = 'indexed'"
+        ),
+        {"document_id": document_id, "version_id": version_id},
+    )
+    return True
 
 
 async def resolve_doc_keys_by_source_paths(

@@ -138,6 +138,7 @@ class _Registration:
     version_id: str
     doc_key: str
     short_circuit: IngestResult | None
+    tombstoned: bool = False
 
 
 class IngestionPipeline:
@@ -257,6 +258,7 @@ class IngestionPipeline:
             version_id=registered.version_id,
             doc_key=registered.doc_key,
             short_circuit=short_circuit,
+            tombstoned=registered.tombstoned,
         )
 
     async def _registration_short_circuit(
@@ -269,7 +271,9 @@ class IngestionPipeline:
         object_key: str,
         registered: registry.RegisteredVersion,
     ) -> IngestResult | None:
-        if not registered.created:
+        # A retired document never short-circuits: retirement removed its chunks
+        # and points, so 0 == 0 would read as in sync. Reindex it to restore it.
+        if not registered.created and not registered.tombstoned:
             state = await self._version_state(session, registered.version_id)
             if (
                 state == "indexed"
@@ -516,6 +520,9 @@ class IngestionPipeline:
             metrics=doc_metrics.as_dict(),
             processing_config_hash=self._processing_config_hash(),
         )
+        restored = registration.tombstoned and await registry.restore_document(
+            session, document_id=registration.document_id, version_id=registration.version_id
+        )
         # With this version indexed, settle which revision of the document is
         # currently effective and close out the ones it superseded.
         plans = await registry.reconcile_document_versions(session, registration.document_id)
@@ -529,6 +536,7 @@ class IngestionPipeline:
                     "doc_key": registration.doc_key,
                     "content_hash": content_hash,
                     "n_points": n_points,
+                    "restored": restored,
                 },
             ),
         )
