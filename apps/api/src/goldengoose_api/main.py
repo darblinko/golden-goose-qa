@@ -80,6 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.audit_runner = AuditReportRunner(warehouse=warehouse, graph=graph_walker)
 
     async with AsyncExitStack() as stack:
+        stack.push_async_callback(app.state.providers.aclose)
         checkpointer = await stack.enter_async_context(
             AsyncPostgresSaver.from_conn_string(_checkpointer_conninfo(settings))
         )

@@ -34,6 +34,17 @@ class ProviderSet:
     ocr: OCRProvider
     using_fakes: tuple[str, ...]
 
+    async def aclose(self) -> None:
+        """Close every provider's network client, even if one close fails."""
+        errors: list[BaseException] = []
+        for provider in (self.llm, self.embeddings, self.rerank, self.ocr):
+            try:
+                await provider.aclose()
+            except Exception as exc:
+                errors.append(exc)
+        if errors:
+            raise ExceptionGroup("provider close failed", errors)
+
 
 def build_providers(settings: ProviderSettings) -> ProviderSet:
     fakes: list[str] = []

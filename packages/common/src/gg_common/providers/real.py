@@ -16,6 +16,14 @@ from gg_common.providers.base import (
     RerankResult,
 )
 
+
+class _HttpClientMixin:
+    _client: httpx.AsyncClient
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+
 _RETRY = retry(
     retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
     wait=wait_exponential(multiplier=1, max=30),
@@ -54,7 +62,7 @@ def _image_mime_type(image_bytes: bytes) -> str:
     )
 
 
-class AnthropicLLMProvider(LLMProvider):
+class AnthropicLLMProvider(_HttpClientMixin, LLMProvider):
     def __init__(self, api_key: str, default_model: str, timeout: float = 120.0) -> None:
         self._client = httpx.AsyncClient(
             base_url="https://api.anthropic.com",
@@ -96,7 +104,7 @@ class AnthropicLLMProvider(LLMProvider):
         return "".join(b["text"] for b in data["content"] if b["type"] == "text")
 
 
-class VoyageEmbeddingProvider(EmbeddingProvider):
+class VoyageEmbeddingProvider(_HttpClientMixin, EmbeddingProvider):
     def __init__(
         self,
         api_key: str,
@@ -157,7 +165,7 @@ class VoyageEmbeddingProvider(EmbeddingProvider):
         return (await self._embed([text], "query"))[0]
 
 
-class VoyageRerankProvider(RerankProvider):
+class VoyageRerankProvider(_HttpClientMixin, RerankProvider):
     def __init__(self, api_key: str, model: str, timeout: float = 60.0) -> None:
         self._client = httpx.AsyncClient(
             base_url="https://api.voyageai.com",
@@ -187,7 +195,7 @@ class VoyageRerankProvider(RerankProvider):
         return [RerankResult(index=r["index"], score=r["relevance_score"]) for r in body["data"]]
 
 
-class GeminiOCRProvider(OCRProvider):
+class GeminiOCRProvider(_HttpClientMixin, OCRProvider):
     _PROMPT = (
         "Transcribe this scanned document page exactly. Preserve reading order, "
         "table structure as markdown, and mark illegible regions as [ILLEGIBLE]. "

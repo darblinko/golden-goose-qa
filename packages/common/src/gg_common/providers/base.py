@@ -26,7 +26,15 @@ class OCRPage:
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
 
-class LLMProvider(ABC):
+class ClosableProvider:
+    """Providers that hold network clients release them in aclose(). The
+    default is a no-op so fakes and stateless providers need no override."""
+
+    async def aclose(self) -> None:
+        return None
+
+
+class LLMProvider(ClosableProvider, ABC):
     @abstractmethod
     async def complete(
         self,
@@ -38,7 +46,7 @@ class LLMProvider(ABC):
     ) -> str: ...
 
 
-class EmbeddingProvider(ABC):
+class EmbeddingProvider(ClosableProvider, ABC):
     dimensions: int
 
     @abstractmethod
@@ -48,13 +56,13 @@ class EmbeddingProvider(ABC):
     async def embed_query(self, text: str) -> list[float]: ...
 
 
-class RerankProvider(ABC):
+class RerankProvider(ClosableProvider, ABC):
     @abstractmethod
     async def rerank(
         self, query: str, documents: list[str], *, top_k: int
     ) -> list[RerankResult]: ...
 
 
-class OCRProvider(ABC):
+class OCRProvider(ClosableProvider, ABC):
     @abstractmethod
     async def ocr_page(self, image_bytes: bytes, *, page_number: int) -> OCRPage: ...
