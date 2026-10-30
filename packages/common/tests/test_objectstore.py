@@ -44,15 +44,42 @@ def test_empty_endpoint_and_key_defer_to_sdk_defaults(monkeypatch):
     assert captured["region_name"] == "us-east-1"
 
 
-class _FakeS3Client:
-    """Minimal boto3 S3 stand-in recording versioning calls."""
+def _client_error(code: str, operation: str) -> botocore.exceptions.ClientError:
+    return botocore.exceptions.ClientError({"Error": {"Code": code, "Message": code}}, operation)
 
-    def __init__(self, *, versioning_error: Exception | None = None) -> None:
+
+class _FakeS3Client:
+    """Minimal boto3 S3 stand-in recording bucket and versioning calls.
+
+    list_buckets raises AccessDenied, as the AWS task policy denies
+    account-wide listing (infra/terraform/aws/iam.tf)."""
+
+    def __init__(
+        self,
+        *,
+        versioning_error: Exception | None = None,
+        existing: frozenset[str] = frozenset({"gg-documents"}),
+        head_error_code: str | None = None,
+    ) -> None:
         self.versioning_calls: list[dict] = []
+        self.created: list[str] = []
         self._versioning_error = versioning_error
+        self._existing = set(existing)
+        self._head_error_code = head_error_code
 
     def list_buckets(self):
-        return {"Buckets": [{"Name": "gg-documents"}]}
+        raise _client_error("AccessDenied", "ListBuckets")
+
+    def head_bucket(self, *, Bucket):
+        if self._head_error_code is not None:
+            raise _client_error(self._head_error_code, "HeadBucket")
+        if Bucket not in self._existing:
+            raise _client_error("404", "HeadBucket")
+        return {}
+
+    def create_bucket(self, *, Bucket):
+        self.created.append(Bucket)
+        self._existing.add(Bucket)
 
     def put_bucket_versioning(self, *, Bucket, VersioningConfiguration):
         self.versioning_calls.append({"bucket": Bucket, "config": VersioningConfiguration})
@@ -82,6 +109,28 @@ def test_ensure_bucket_tolerates_backend_without_versioning(monkeypatch):
     # A backend that rejects versioning must not break bucket setup.
     store.ensure_bucket("gg-documents")
     assert client.versioning_calls  # attempted, then swallowed
+
+
+def test_ensure_bucket_checks_existing_bucket_without_listing_account(monkeypatch):
+    client = _FakeS3Client()
+    store = _store_with_fake(monkeypatch, client)
+    store.ensure_bucket("gg-documents")
+    assert client.created == []
+
+
+def test_ensure_bucket_creates_missing_bucket(monkeypatch):
+    client = _FakeS3Client(existing=frozenset())
+    store = _store_with_fake(monkeypatch, client)
+    store.ensure_bucket("gg-artifacts")
+    assert client.created == ["gg-artifacts"]
+
+
+def test_ensure_bucket_forbidden_is_an_explicit_error(monkeypatch):
+    client = _FakeS3Client(head_error_code="403")
+    store = _store_with_fake(monkeypatch, client)
+    with pytest.raises(PermissionError, match="gg-documents"):
+        store.ensure_bucket("gg-documents")
+    assert client.created == []
 
 
 def test_read_verified_returns_bytes_when_hash_matches(tmp_path):

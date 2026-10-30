@@ -46,9 +46,25 @@ class S3ObjectStore(ObjectStore):
         self._client = boto3.client("s3", **kwargs)
 
     def ensure_bucket(self, bucket: str) -> None:
-        existing = {b["Name"] for b in self._client.list_buckets().get("Buckets", [])}
-        if bucket not in existing:
-            self._client.create_bucket(Bucket=bucket)
+        """Create the bucket only if it does not exist. The check addresses the
+        bucket by name (HeadBucket, covered by s3:ListBucket on that bucket):
+        the AWS task policy denies account-wide ListBuckets, and deployed
+        buckets are provisioned by Terraform, so creation happens only where
+        the bucket is genuinely absent (local SeaweedFS)."""
+        import botocore.exceptions
+
+        try:
+            self._client.head_bucket(Bucket=bucket)
+        except botocore.exceptions.ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in ("404", "NoSuchBucket", "NotFound"):
+                self._client.create_bucket(Bucket=bucket)
+            elif code in ("403", "AccessDenied", "Forbidden"):
+                raise PermissionError(
+                    f"bucket {bucket!r} exists but this identity cannot access it"
+                ) from exc
+            else:
+                raise
         self._enable_versioning(bucket)
 
     def _enable_versioning(self, bucket: str) -> None:
