@@ -6,6 +6,7 @@ the twelve audit query patterns the retrieval evals exercise, including the
 five seeded defects.
 """
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -16,8 +17,9 @@ from gg_synthdata.render.common import fmt_date
 
 # Bumped whenever the QA item shape changes so the nightly battery can reject a
 # stale dashboard restored from an older schema. v2 split non-document
-# identifiers out of evidence_doc_ids and added per-item expected_routes.
-QA_SCHEMA_VERSION = 2
+# identifiers out of evidence_doc_ids and added per-item expected_routes. v3
+# added must_exclude and evidence_revisions.
+QA_SCHEMA_VERSION = 3
 
 Pattern = Literal[
     "revision_approval",
@@ -108,6 +110,9 @@ class QaItem(BaseModel):
     evidence_doc_ids: list[str] = Field(default_factory=list)  # retrievable documents only
     answer_source_ids: list[str] = Field(default_factory=list)  # registers / TM-100 rows
     expected_routes: list[str] = Field(min_length=1)  # routes that can answer this item
+    # Doc keys or "DOC-KEY@REVISION" that must not surface for this question.
+    must_exclude: list[str] = Field(default_factory=list)
+    evidence_revisions: dict[str, str] = Field(default_factory=dict)  # doc key -> revision
     smoke: bool = False
     difficulty: Literal["easy", "medium", "hard"]
 
@@ -639,6 +644,59 @@ def _governance_clinical_questions(world: World) -> list[tuple[str, str, list[st
     return out
 
 
+# Record ids a question can name; one per family so neighbours are found by order.
+_RECORD_ID_RE = re.compile(
+    r"\b(?:CAPA-\d{4}-\d{3}|C-\d{4}-\d{4}|NCR-\d{4}-\d{3,}|MDR-\d{4}|AUD-\d{4}-\d{2}|MRM-\d{4}-\d{2})\b"
+)
+
+
+def _record_families(world: World) -> list[list[str]]:
+    return [
+        sorted(c.capa_id for c in world.capas),
+        sorted(c.complaint_id for c in world.complaints),
+        sorted(n.ncr_id for n in world.ncrs),
+        sorted(m.mdr_id for m in world.mdrs),
+        sorted(a.audit_id for a in world.internal_audits),
+        sorted(r.review_id for r in world.management_reviews),
+    ]
+
+
+def _neighbour_exclusions(
+    question: str, evidence: list[str], families: list[list[str]]
+) -> list[str]:
+    """The records either side of the one record a question names. Exact-record
+    scope must keep them out of the results."""
+    named = set(_RECORD_ID_RE.findall(question))
+    if len(named) != 1:
+        return []
+    (record_id,) = named
+    for family in families:
+        if record_id in family:
+            i = family.index(record_id)
+            neighbours = family[max(i - 1, 0) : i] + family[i + 1 : i + 2]
+            return [n for n in neighbours if n not in evidence]
+    return []
+
+
+def _revision_expectations(world: World, doc_id: str) -> tuple[dict[str, str], list[str]]:
+    """Pin the current revision; exclude the prior one where it is rendered as
+    an archived file (SOPs and WIs with history)."""
+    doc = world.doc(doc_id)
+    exclude = []
+    if doc.doc_type in ("sop", "wi") and len(doc.revisions) > 1:
+        exclude.append(f"{doc_id}@{doc.revisions[-2].rev}")
+    return {doc_id: doc.current.rev}, exclude
+
+
+def _expectations(
+    world: World, pattern: str, question: str, doc_ids: list[str], families: list[list[str]]
+) -> tuple[list[str], dict[str, str]]:
+    if pattern == "revision_approval" and len(doc_ids) == 1:
+        revisions, exclude = _revision_expectations(world, doc_ids[0])
+        return exclude, revisions
+    return _neighbour_exclusions(question, doc_ids, families), {}
+
+
 def build_qa_set(world: World) -> QaSet:
     generators: tuple[tuple[Pattern, list[tuple[str, str, list[str], str]]], ...] = (
         ("revision_approval", _revision_questions(world)),
@@ -656,9 +714,13 @@ def build_qa_set(world: World) -> QaSet:
     )
     items: list[QaItem] = []
     counter = 1
+    families = _record_families(world)
     for pattern, rows in generators:
         for i, (question, answer, evidence, difficulty) in enumerate(rows):
             doc_ids, source_ids = _split_evidence(evidence)
+            must_exclude, evidence_revisions = _expectations(
+                world, pattern, question, doc_ids, families
+            )
             items.append(
                 QaItem(
                     id=f"QA-{counter:04d}",
@@ -668,6 +730,8 @@ def build_qa_set(world: World) -> QaSet:
                     evidence_doc_ids=doc_ids,
                     answer_source_ids=source_ids,
                     expected_routes=list(_PATTERN_ROUTES[pattern]),
+                    must_exclude=must_exclude,
+                    evidence_revisions=evidence_revisions,
                     smoke=i < _SMOKE_QUOTA[pattern],
                     difficulty=difficulty,  # type: ignore[arg-type]
                 )
