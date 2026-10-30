@@ -142,3 +142,45 @@ def value_or_none(value: str, *sentinels: str) -> str | None:
     if not stripped or stripped in sentinels:
         return None
     return stripped
+
+
+# The labelled date each record form is "of": when the complaint arrived, the
+# NCR or CAPA opened, the MDR was submitted, the audit or review took place.
+# It becomes the version's effective_from so an as-of filter excludes a record
+# dated after the requested moment. A DHR has no single labelled event date.
+RECORD_EVENT_DATE_LABELS: dict[str, str] = {
+    "complaint": "Date Received",
+    "ncr": "Date Opened",
+    "mdr": "Date Submitted to FDA",
+    "verification_report": "Date Completed",
+    "capa": "Date Opened",
+    "supplier_audit": "Audit Date",
+    "internal_audit": "Audit Date",
+    "management_review": "Meeting Date",
+    "emdr": "Date Submitted",
+}
+
+_NOT_YET_DATED = frozenset({"in progress"})
+
+
+def record_event_date(parsed: ParsedDocument) -> date | None:
+    """The record's own event date, or None for a type without one or a
+    milestone not reached yet. A malformed form raises RecordExtractionError."""
+    label = RECORD_EVENT_DATE_LABELS.get(parsed.meta.doc_type)
+    if label is None:
+        return None
+    if parsed.meta.doc_type in PDF_FORM_LABELS:
+        value = pdf_form_fields(parsed).get(label, "")
+    else:
+        fields: dict[str, str] = {}
+        for block in parsed.blocks:
+            fields.update(block.fields)
+        value = fields.get(label, "")
+    if value.strip().lower() in _NOT_YET_DATED:
+        return None
+    if parsed.meta.doc_type == "emdr":
+        try:
+            return date.fromisoformat(value.strip())
+        except ValueError:
+            raise RecordExtractionError(f"unparseable date field: {value!r}") from None
+    return parse_form_date(value)

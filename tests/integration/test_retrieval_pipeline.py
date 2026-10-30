@@ -133,3 +133,27 @@ async def test_explicit_revision_scope_returns_only_that_revision(ingested_corpu
         assert {c.revision for c in rev_b.chunks} == {"B"}
     finally:
         await qdrant.close()
+
+
+async def test_as_of_excludes_a_record_dated_after_the_moment(ingested_corpus, app_engine):
+    """C-2025-0101 was received on 03-Jun-2025. Its event date is its
+    effective_from, so an as-of date before receipt must not return it."""
+    settings = get_settings()
+    providers = build_providers(settings.providers)
+    qdrant = make_client(settings.qdrant)
+    session_factory = async_sessionmaker(app_engine, expire_on_commit=False)
+    try:
+        retriever = HybridRetriever(
+            settings=settings,
+            qdrant=qdrant,
+            session_factory=session_factory,
+            embeddings=providers.embeddings,
+            reranker=providers.rerank,
+        )
+        query = "complaint C-2025-0101 description and investigation"
+        before = await retriever.retrieve(query, doc_key="C-2025-0101", as_of=date(2025, 1, 31))
+        assert not before.chunks
+        after = await retriever.retrieve(query, doc_key="C-2025-0101", as_of=date(2025, 7, 1))
+        assert after.chunks
+    finally:
+        await qdrant.close()

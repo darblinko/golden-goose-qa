@@ -11,6 +11,7 @@ import hashlib
 import json
 import time
 from dataclasses import asdict, dataclass, replace
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +29,7 @@ from gg_ingestion.artifacts import artifact_key
 from gg_ingestion.chunking import chunk_document
 from gg_ingestion.controlled import enforce_controlled_metadata
 from gg_ingestion.docmeta import UnrecognizedDocumentError
+from gg_ingestion.extract.records import RecordExtractionError, record_event_date
 from gg_ingestion.metrics import IngestGateError, compute_metrics, enforce_gates
 from gg_ingestion.models import DocMeta, ParsedDocument
 from gg_ingestion.parsers.base import (
@@ -127,6 +129,12 @@ class StageFailureRateError(RuntimeError):
             f"{threshold:.0%} gate: {report.stage_failures}/{report.stage_attempts} "
             "attempted documents failed a pipeline stage"
         )
+
+
+def version_effective_from(parsed: ParsedDocument) -> date | None:
+    """A controlled document's effective date, else a record's own event date."""
+    controlled = registry.parse_effective_date(parsed.attributes.get("effective_date"))
+    return controlled or record_event_date(parsed)
 
 
 @dataclass(frozen=True)
@@ -405,7 +413,8 @@ class IngestionPipeline:
         # as evidence whose revision cannot be pinned to a date.
         try:
             enforce_controlled_metadata(parsed.meta, parsed.attributes)
-        except IngestGateError as exc:
+            effective_from = version_effective_from(parsed)
+        except (IngestGateError, RecordExtractionError) as exc:
             await registry.update_version(
                 session,
                 registration.version_id,
@@ -420,7 +429,6 @@ class IngestionPipeline:
                 stage_attempted=True,
             )
 
-        effective_from = registry.parse_effective_date(parsed.attributes.get("effective_date"))
         await registry.update_version(
             session,
             registration.version_id,
