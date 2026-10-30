@@ -16,7 +16,7 @@ export default function ChatView({
 }: {
   messages: Message[];
   liveTurn: LiveTurn | null;
-  // A turn is streaming somewhere, possibly in another thread.
+  // A turn is streaming somewhere, or this thread's history has not loaded.
   busy: boolean;
   error: string | null;
   onSend: (content: string) => void;

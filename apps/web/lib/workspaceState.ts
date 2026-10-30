@@ -43,3 +43,42 @@ export function panelCitations(
     .find((message) => message.role === "assistant");
   return lastAssistant?.citations ?? [];
 }
+
+/** The messages on screen and the thread they belong to. Messages are
+ * replaced the moment another thread opens, so one thread's history is never
+ * shown under another, and sending waits until the history has loaded. */
+export interface ThreadView {
+  threadId: string | null;
+  status: "loading" | "ready" | "failed";
+  messages: Message[];
+}
+
+export function emptyThreadView(): ThreadView {
+  return { threadId: null, status: "ready", messages: [] };
+}
+
+export function openingThread(threadId: string): ThreadView {
+  return { threadId, status: "loading", messages: [] };
+}
+
+/** Apply a history response; one for a thread no longer shown is ignored. */
+export function threadLoaded(
+  view: ThreadView,
+  threadId: string,
+  messages: Message[],
+): ThreadView {
+  return view.threadId === threadId
+    ? { threadId, status: "ready", messages }
+    : view;
+}
+
+export function threadLoadFailed(
+  view: ThreadView,
+  threadId: string,
+): ThreadView {
+  return view.threadId === threadId ? { ...view, status: "failed" } : view;
+}
+
+export function canSend(view: ThreadView, turnStreaming: boolean): boolean {
+  return view.status === "ready" && !turnStreaming;
+}

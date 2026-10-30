@@ -11,10 +11,16 @@ import {
 } from "@/lib/api";
 import type { Message, Thread } from "@/lib/types";
 import {
+  canSend,
   type CitationSelection,
+  emptyThreadView,
   type LiveTurn,
   liveTurnForThread,
+  openingThread,
   panelCitations,
+  threadLoaded,
+  threadLoadFailed,
+  type ThreadView,
 } from "@/lib/workspaceState";
 import AuditPanel from "./AuditPanel";
 import ChatView from "./ChatView";
@@ -34,7 +40,7 @@ export default function Workspace({
   const [threads, setThreads] = useState<Thread[]>([]);
   const [view, setView] = useState<WorkspaceView>("chat");
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [threadView, setThreadView] = useState<ThreadView>(emptyThreadView);
   const [liveTurn, setLiveTurn] = useState<LiveTurn | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selection, setSelection] = useState<CitationSelection | null>(null);
@@ -82,11 +88,15 @@ export default function Workspace({
     async (threadId: string) => {
       setView("chat");
       showThread(threadId);
+      setThreadView(openingThread(threadId));
       setSelection(null);
       try {
         const detail = await getThread(threadId);
-        if (activeThreadRef.current === threadId) setMessages(detail.messages);
+        setThreadView((current) =>
+          threadLoaded(current, threadId, detail.messages),
+        );
       } catch (err) {
+        setThreadView((current) => threadLoadFailed(current, threadId));
         handleFailure(err, "could not load the thread");
       }
     },
@@ -96,7 +106,7 @@ export default function Workspace({
   const newThread = useCallback(() => {
     setView("chat");
     showThread(null);
-    setMessages([]);
+    setThreadView(emptyThreadView());
     setSelection(null);
     setError(null);
   }, [showThread]);
@@ -111,6 +121,7 @@ export default function Workspace({
           const thread = await createThread();
           threadId = thread.id;
           showThread(threadId);
+          setThreadView({ threadId, status: "ready", messages: [] });
         }
       } catch (err) {
         handleFailure(err, "could not create a thread");
@@ -127,7 +138,12 @@ export default function Workspace({
         trace: [],
         created_at: "",
       };
-      setMessages((current) => [...current, userMessage]);
+      const sendingThreadId = threadId;
+      setThreadView((current) =>
+        current.threadId === sendingThreadId
+          ? { ...current, messages: [...current.messages, userMessage] }
+          : current,
+      );
       setLiveTurn({ threadId, requestId, steps: [], draft: "", citations: [] });
 
       const isCurrent = () => activeThreadRef.current === threadId;
@@ -146,7 +162,9 @@ export default function Workspace({
       const finish = async () => {
         try {
           const detail = await getThread(threadId);
-          if (isCurrent()) setMessages(detail.messages);
+          setThreadView((current) =>
+            threadLoaded(current, threadId, detail.messages),
+          );
         } catch (err) {
           handleFailure(err, "could not reload the thread");
         }
@@ -184,6 +202,7 @@ export default function Workspace({
   );
 
   const visibleTurn = liveTurnForThread(liveTurn, activeThreadId);
+  const messages = threadView.messages;
   const citationsShown = panelCitations(messages, visibleTurn, selection);
 
   return (
@@ -207,7 +226,7 @@ export default function Workspace({
           <ChatView
             messages={messages}
             liveTurn={visibleTurn}
-            busy={liveTurn !== null}
+            busy={!canSend(threadView, liveTurn !== null)}
             error={error}
             onSend={(content) => void send(content)}
             onMarkerClick={(messageId, marker) =>

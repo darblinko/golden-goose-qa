@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Citation, Message } from "./types";
 import {
+  canSend,
+  emptyThreadView,
   type LiveTurn,
   liveTurnForThread,
+  openingThread,
   panelCitations,
+  threadLoaded,
+  threadLoadFailed,
 } from "./workspaceState.ts";
 
 function citation(marker: number, docKey: string): Citation {
@@ -79,4 +84,34 @@ test("a turn streaming in thread A is not shown in thread B", () => {
   };
   assert.equal(liveTurnForThread(live, "thread-b"), null);
   assert.equal(liveTurnForThread(live, "thread-a"), live);
+});
+
+test("switching threads clears the previous thread's messages at once", () => {
+  const onA = threadLoaded(openingThread("A"), "A", [first]);
+  const switching = openingThread("B");
+  assert.deepEqual(switching.messages, []);
+  assert.equal(canSend(switching, false), false);
+  assert.equal(canSend(onA, false), true);
+});
+
+test("a late history response for the thread left behind is ignored", () => {
+  const onB = openingThread("B");
+  const lateA = threadLoaded(onB, "A", [first]);
+  assert.equal(lateA, onB);
+  const loadedB = threadLoaded(onB, "B", [second]);
+  assert.deepEqual(loadedB.messages, [second]);
+  assert.equal(canSend(loadedB, false), true);
+});
+
+test("a failed history load keeps sending disabled for that thread", () => {
+  const failed = threadLoadFailed(openingThread("B"), "B");
+  assert.equal(failed.status, "failed");
+  assert.deepEqual(failed.messages, []);
+  assert.equal(canSend(failed, false), false);
+  assert.equal(threadLoadFailed(failed, "A"), failed);
+});
+
+test("a new, unsaved thread can send at once but not while a turn streams", () => {
+  assert.equal(canSend(emptyThreadView(), false), true);
+  assert.equal(canSend(emptyThreadView(), true), false);
 });
