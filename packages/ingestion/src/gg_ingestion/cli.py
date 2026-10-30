@@ -145,8 +145,9 @@ async def _derive(local_store: str | None, skip_graph: bool) -> int:
 def _print_derive_report(report: DeriveReport) -> None:
     graph_note = "graph loaded" if report.graph_loaded else "graph skipped"
     print(
-        f"derived {report.documents} documents: {report.nodes} nodes, "
-        f"{report.edges} edges, {report.register_rows} register rows ({graph_note})"
+        f"derived {report.documents} documents: {report.nodes} node assertions, "
+        f"{report.edges} edge assertions (the graph load merges duplicates by key), "
+        f"{report.register_rows} register rows ({graph_note})"
     )
     for doc_key, refs in sorted(report.dangling_refs.items()):
         print(f"dangling refs in {doc_key}: {', '.join(refs)}")

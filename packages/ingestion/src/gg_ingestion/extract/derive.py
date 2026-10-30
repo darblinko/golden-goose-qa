@@ -40,6 +40,8 @@ class RegistryDocument:
 @dataclass(frozen=True)
 class DeriveReport:
     documents: int
+    # Assertions emitted, before the graph load merges duplicates by key; not
+    # the node and relationship counts stored in the graph.
     nodes: int
     edges: int
     register_rows: int
