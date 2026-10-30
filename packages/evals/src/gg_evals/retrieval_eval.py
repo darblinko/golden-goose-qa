@@ -42,6 +42,9 @@ class EvalItem(BaseModel):
     # Expected revision per evidence doc, used for exact-revision citation
     # scoring in the answer eval. Empty leaves scoring at doc-key granularity.
     evidence_revisions: dict[str, str] = {}
+    # The golden answer. The answer eval reads the stated count from it for
+    # counts_aggregates items; other patterns do not use it yet.
+    answer: str = ""
     smoke: bool = False
 
 

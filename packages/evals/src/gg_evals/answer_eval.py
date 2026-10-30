@@ -7,8 +7,15 @@ own [n] markers cite, so citing the wrong document lowers support even when the
 right document sits elsewhere in the window. Citation and support metrics
 average over grounded answers only — an insufficient_evidence verdict has no
 citations to score and is already penalized once through grounded_rate.
+
+Task checks compare the answer against the golden answer where the task has a
+single checkable fact. A counts_aggregates item is answered from the record
+warehouse, has no document evidence, and is correct only when a grounded answer
+states the golden count. These items enter grounded_rate and correctness but
+not the citation and support means, which need golden documents.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -29,6 +36,34 @@ class AnswerResult:
     citation_precision: float
     citation_recall: float
     support: float
+    correct: bool | None = None  # None when the item has no task check
+    document_evidence: bool = True
+
+
+_COUNT_PATTERN = "counts_aggregates"
+_LEADING_COUNT_RE = re.compile(r"^\s*(\d[\d,]*)\b")
+_MARKER_RE = re.compile(r"\[\d+\]")
+_NUMBER_RE = re.compile(r"\d[\d,]*")
+
+
+def expected_count(item: EvalItem) -> int | None:
+    """The count a counts_aggregates golden answer states first, e.g. 17 in
+    "17 CAPAs were opened in 2025."; None for any other item."""
+    if item.pattern != _COUNT_PATTERN:
+        return None
+    match = _LEADING_COUNT_RE.match(item.answer)
+    return int(match.group(1).replace(",", "")) if match else None
+
+
+def answer_correct(item: EvalItem, state: dict[str, Any]) -> bool | None:
+    expected = expected_count(item)
+    if expected is None:
+        return None
+    if state.get("verdict") != "grounded":
+        return False
+    prose = _MARKER_RE.sub(" ", state.get("answer") or "")
+    stated = {int(n.replace(",", "")) for n in _NUMBER_RE.findall(prose)}
+    return expected in stated
 
 
 @dataclass(frozen=True)
@@ -54,6 +89,14 @@ class AnswerReport:
     def support(self) -> float:
         return _grounded_mean(self.results, lambda r: r.support)
 
+    def checked(self) -> tuple[AnswerResult, ...]:
+        return tuple(r for r in self.results if r.correct is not None)
+
+    @property
+    def correctness(self) -> float:
+        checked = self.checked()
+        return sum(1 for r in checked if r.correct) / len(checked) if checked else 0.0
+
     def ungrounded(self) -> tuple[AnswerResult, ...]:
         return tuple(r for r in self.results if not r.grounded)
 
@@ -65,6 +108,13 @@ class AnswerReport:
             "citation_precision": round(self.citation_precision, 4),
             "citation_recall": round(self.citation_recall, 4),
             "support": round(self.support, 4),
+            "n_checked": len(self.checked()),
+            "correctness": round(self.correctness, 4),
+            "incorrect": [
+                {"item_id": r.item_id, "pattern": r.pattern}
+                for r in self.checked()
+                if not r.correct
+            ],
             "ungrounded": [
                 {"item_id": r.item_id, "pattern": r.pattern, "verdict": r.verdict}
                 for r in self.ungrounded()
@@ -73,7 +123,7 @@ class AnswerReport:
 
 
 def _grounded_mean(results: tuple[AnswerResult, ...], value: Any) -> float:
-    grounded = [value(r) for r in results if r.grounded]
+    grounded = [value(r) for r in results if r.grounded and r.document_evidence]
     return sum(grounded) / len(grounded) if grounded else 0.0
 
 
@@ -124,7 +174,7 @@ def _citation_scores(
 def score_final_state(item: EvalItem, state: dict[str, Any]) -> AnswerResult:
     verdict = state.get("verdict", "")
     grounded = verdict == "grounded"
-    golden, _ = retrievable_evidence(item.evidence_doc_ids)
+    golden, no_documents = retrievable_evidence(item.evidence_doc_ids)
     precision, recall = _citation_scores(
         state.get("citations") or [], golden, item.evidence_revisions
     )
@@ -136,7 +186,20 @@ def score_final_state(item: EvalItem, state: dict[str, Any]) -> AnswerResult:
         citation_precision=precision,
         citation_recall=recall,
         support=cited_sentence_support(state.get("answer", ""), _evidence_texts(state)),
+        correct=answer_correct(item, state),
+        document_evidence=no_documents is None,
     )
+
+
+def select_answer_items(
+    items: list[EvalItem], *, smoke_only: bool
+) -> tuple[list[EvalItem], dict[str, str]]:
+    """Retrieval-scorable items plus the warehouse items a task check can score."""
+    selected, skipped = select_items(items, smoke_only=smoke_only)
+    checkable = {i.id for i in items if i.id in skipped and expected_count(i) is not None}
+    kept_ids = {i.id for i in selected} | checkable
+    kept = [item for item in items if item.id in kept_ids]
+    return kept, {item_id: why for item_id, why in skipped.items() if item_id not in checkable}
 
 
 async def evaluate_answers(
@@ -144,7 +207,7 @@ async def evaluate_answers(
 ) -> AnswerReport:
     """graph is a compiled agent graph (build_agent_graph without a
     checkpointer — eval turns are independent, never conversational)."""
-    selected, skipped = select_items(items, smoke_only=smoke_only)
+    selected, skipped = select_answer_items(items, smoke_only=smoke_only)
     results = []
     for item in selected:
         final = await graph.ainvoke(initial_state(item.question))

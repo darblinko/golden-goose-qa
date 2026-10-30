@@ -45,6 +45,9 @@ class BatteryThresholds:
     # insufficient_evidence verdict is penalized through grounded_rate, not here.
     citation_precision: float = 0.5
     citation_recall: float = 0.5
+    # Task checks have one right answer each (a register count), so any wrong
+    # checked answer fails the run.
+    answer_correctness: float = 1.0
     routing_accuracy: float = 0.9
     max_noise_degradation: float = 0.15
 
@@ -81,7 +84,7 @@ def gate_failures(
     noise: NoiseReport,
     thresholds: BatteryThresholds,
 ) -> tuple[str, ...]:
-    checks = (
+    checks = [
         ("retrieval recall", retrieval.recall, thresholds.recall, True),
         ("grounded rate", answers.grounded_rate, thresholds.grounded_rate, True),
         ("answer support", answers.support, thresholds.support, True),
@@ -89,7 +92,11 @@ def gate_failures(
         ("citation recall", answers.citation_recall, thresholds.citation_recall, True),
         ("routing accuracy", routing.accuracy, thresholds.routing_accuracy, True),
         ("noise degradation", noise.degradation, thresholds.max_noise_degradation, False),
-    )
+    ]
+    if answers.checked():
+        checks.append(
+            ("answer correctness", answers.correctness, thresholds.answer_correctness, True)
+        )
     failures = []
     for name, actual, limit, higher_is_better in checks:
         ok = actual >= limit if higher_is_better else actual <= limit

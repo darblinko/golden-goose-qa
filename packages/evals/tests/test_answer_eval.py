@@ -162,3 +162,63 @@ def test_support_uses_the_rendered_excerpt():
     long_text = "Unrelated preamble about document control. " * 200 + EVIDENCE_TEXT
     state = dict(GROUNDED_STATE) | {"parents": [{"text": long_text}]}
     assert score_final_state(ITEM, state).support == 0.0
+
+
+COUNT_ITEM = EvalItem(
+    id="QA-C1",
+    question="How many CAPAs were opened in 2025?",
+    pattern="counts_aggregates",
+    evidence_doc_ids=["corpus:capas:2025"],
+    answer="17 CAPAs were opened in 2025.",
+    smoke=True,
+)
+
+
+def _count_state(answer: str, verdict: str = "grounded") -> dict[str, Any]:
+    return {
+        "verdict": verdict,
+        "answer": answer,
+        "citations": [{"doc_key": "registers"}],
+        "parents": [{"text": "count\n17"}],
+        "external_parents": [],
+    }
+
+
+def test_count_answer_must_state_the_golden_number():
+    assert score_final_state(COUNT_ITEM, _count_state("17 CAPAs were opened in 2025. [1]")).correct
+    assert not score_final_state(
+        COUNT_ITEM, _count_state("12 CAPAs were opened in 2025. [1]")
+    ).correct
+
+
+def test_count_answer_marker_or_year_is_not_the_number():
+    item = COUNT_ITEM.model_copy(update={"answer": "1 CAPA was opened in 2025."})
+    assert not score_final_state(
+        item, _count_state("Several CAPAs were opened in 2025. [1]")
+    ).correct
+
+
+def test_count_refusal_is_not_correct():
+    state = _count_state("The records do not answer this.", verdict="insufficient_evidence")
+    assert score_final_state(COUNT_ITEM, state).correct is False
+
+
+def test_items_without_a_task_check_have_no_correctness():
+    assert score_final_state(ITEM, GROUNDED_STATE).correct is None
+
+
+async def test_warehouse_count_items_are_evaluated_for_correctness():
+    graph = StubGraph(
+        {
+            ITEM.question: GROUNDED_STATE,
+            COUNT_ITEM.question: _count_state("12 CAPAs were opened in 2025. [1]"),
+        }
+    )
+    report = await evaluate_answers(graph, [ITEM, COUNT_ITEM])
+    assert "QA-C1" not in report.skipped
+    assert report.correctness == 0.0
+    assert report.as_dict()["incorrect"] == [{"item_id": "QA-C1", "pattern": "counts_aggregates"}]
+    # Warehouse answers carry no golden documents, so they do not enter the
+    # citation and support means.
+    assert report.citation_precision == 0.5
+    assert report.support == 1.0

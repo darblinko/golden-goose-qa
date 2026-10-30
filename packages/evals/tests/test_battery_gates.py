@@ -31,6 +31,7 @@ def _answers(
     support: float,
     citation_precision: float = 1.0,
     citation_recall: float = 1.0,
+    correct: bool | None = None,
 ) -> AnswerReport:
     return AnswerReport(
         results=(
@@ -42,6 +43,7 @@ def _answers(
                 citation_precision=citation_precision,
                 citation_recall=citation_recall,
                 support=support,
+                correct=correct,
             ),
         ),
         skipped={},
@@ -162,3 +164,18 @@ def test_leak_blocks_release_despite_passing_scores():
     assert len(failures) == 1
     assert "non-leakage violation on QA-1" in failures[0]
     assert "SOP-006" in failures[0] and "SOP-004@B" in failures[0]
+
+
+def test_wrong_task_answer_fails_correctness_gate():
+    failures = gate_failures(
+        _retrieval(0.9), _answers(True, 0.8, correct=False), _routing(True), _noise(0.0), THRESHOLDS
+    )
+    assert len(failures) == 1 and "answer correctness" in failures[0]
+
+
+def test_correctness_gate_needs_checked_items():
+    # A run with no task-checkable items has nothing to gate.
+    failures = gate_failures(
+        _retrieval(0.9), _answers(True, 0.8), _routing(True), _noise(0.0), THRESHOLDS
+    )
+    assert failures == ()
