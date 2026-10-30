@@ -168,7 +168,7 @@ async def run_battery(
         await engine.dispose()
 
     failures = gate_failures(retrieval, answers, routing, noise, thresholds) + coverage_failures(
-        evaluated, retrieval, noise, invariants
+        evaluated, retrieval, noise, invariants, correctness_scored=len(answers.checked())
     )
     return BatteryReport(
         retrieval=retrieval, answers=answers, routing=routing, noise=noise, failures=failures

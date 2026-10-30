@@ -115,3 +115,45 @@ def test_fingerprint_is_stable_and_pinnable():
     dropped = items[:-1]  # a lost question changes the fingerprint
     failures = coverage_failures(dropped, _retrieval(8, 1), _noise(6), pinned)
     assert any("fingerprint" in f for f in failures)
+
+
+REQUIRED = CoverageInvariants(
+    min_items=6,
+    min_scored=5,
+    max_skip_rate=0.2,
+    min_per_pattern=2,
+    min_noise_tested=4,
+    required_patterns=frozenset(PATTERNS),
+    min_correctness_scored=2,
+)
+
+
+def test_a_required_pattern_that_disappears_fails():
+    # Dropping every count question left the other floors satisfied.
+    items = [i for i in _items(3) if i.pattern != "counts_aggregates"]
+    failures = coverage_failures(items, _retrieval(6, 0), _noise(6), REQUIRED, correctness_scored=0)
+    assert any("pattern 'counts_aggregates' is missing" in f for f in failures)
+
+
+def test_too_few_correctness_scored_answers_fail():
+    failures = coverage_failures(
+        _items(3), _retrieval(8, 1), _noise(6), REQUIRED, correctness_scored=1
+    )
+    assert failures == ("only 1 answers were scored for correctness, below the floor 2",)
+
+
+def test_required_coverage_passes_when_present():
+    assert (
+        coverage_failures(_items(3), _retrieval(8, 1), _noise(6), REQUIRED, correctness_scored=3)
+        == ()
+    )
+
+
+def test_shipped_invariants_require_every_audit_pattern():
+    from gg_evals.invariants import AUDIT_PATTERNS, FULL_INVARIANTS, SMOKE_INVARIANTS
+
+    assert len(AUDIT_PATTERNS) == 12
+    assert FULL_INVARIANTS.required_patterns == AUDIT_PATTERNS
+    assert SMOKE_INVARIANTS.required_patterns == AUDIT_PATTERNS
+    assert FULL_INVARIANTS.min_correctness_scored > 0
+    assert SMOKE_INVARIANTS.min_correctness_scored > 0

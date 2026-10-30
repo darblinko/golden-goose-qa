@@ -24,6 +24,29 @@ class CoverageInvariants:
     min_per_pattern: int  # every audit pattern needs this much real coverage
     min_noise_tested: int  # items that must actually face distractors
     pinned_fingerprint: str | None = None  # when set, QA structure must match exactly
+    required_patterns: frozenset[str] = frozenset()  # each must be present at all
+    min_correctness_scored: int = 0  # answers the correctness gate must score
+
+
+# The twelve audit query patterns the golden set is generated for
+# (gg_synthdata.qa). Per-pattern floors only see patterns that are present, so
+# a pattern that disappears entirely must be caught by name.
+AUDIT_PATTERNS = frozenset(
+    {
+        "procedure_content",
+        "revision_approval",
+        "trace_walk",
+        "fmea_risk",
+        "capa_thread",
+        "complaint_mdr",
+        "supplier",
+        "training",
+        "governance_clinical",
+        "regulatory_crosswalk",
+        "counts_aggregates",
+        "defect_discovery",
+    }
+)
 
 
 # The full golden set (currently 216 items across 12 patterns, 9 aggregate
@@ -35,6 +58,8 @@ FULL_INVARIANTS = CoverageInvariants(
     max_skip_rate=0.08,
     min_per_pattern=5,
     min_noise_tested=150,
+    required_patterns=AUDIT_PATTERNS,
+    min_correctness_scored=6,  # currently 9 counts_aggregates items
 )
 
 # The smoke subset (currently 30 items after every pattern is represented).
@@ -44,6 +69,8 @@ SMOKE_INVARIANTS = CoverageInvariants(
     max_skip_rate=0.15,
     min_per_pattern=1,
     min_noise_tested=20,
+    required_patterns=AUDIT_PATTERNS,
+    min_correctness_scored=2,  # currently 2 counts_aggregates items
 )
 
 
@@ -60,7 +87,11 @@ def coverage_failures(
     retrieval: EvalReport,
     noise: NoiseReport,
     invariants: CoverageInvariants,
+    *,
+    correctness_scored: int = 0,
 ) -> tuple[str, ...]:
+    """`correctness_scored` is the number of answers the correctness gate
+    scored; the gate is skipped when it is zero, so a floor keeps it live."""
     failures: list[str] = []
     n_items = len(items)
     if n_items < invariants.min_items:
@@ -78,7 +109,17 @@ def coverage_failures(
             f"retrieval skip rate {skip_rate:.4f} exceeds the cap {invariants.max_skip_rate:.4f}"
         )
 
-    for pattern, count in sorted(Counter(i.pattern for i in items).items()):
+    present = Counter(i.pattern for i in items)
+    for pattern in sorted(invariants.required_patterns - present.keys()):
+        failures.append(f"required pattern {pattern!r} is missing from the QA set")
+
+    if correctness_scored < invariants.min_correctness_scored:
+        failures.append(
+            f"only {correctness_scored} answers were scored for correctness, "
+            f"below the floor {invariants.min_correctness_scored}"
+        )
+
+    for pattern, count in sorted(present.items()):
         if count < invariants.min_per_pattern:
             failures.append(
                 f"pattern {pattern!r} has {count} items, "
