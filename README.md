@@ -105,8 +105,8 @@ Python 3.13), and Node 22 for the web UI, the version CI and `Dockerfile.web` us
 are needed; without them every provider is a deterministic fake.
 
 ```bash
-git clone https://github.com/darblinko/golden-goose
-cd golden-goose
+git clone https://github.com/darblinko/golden-goose-qa
+cd golden-goose-qa
 uv sync --locked
 uv run pytest                       # unit tests, no services needed
 ```
